@@ -1,7 +1,5 @@
 """Fachliche Sensorlogik ohne Hardwarezugriffe."""
 
-import math
-
 
 class NtcSensor:
     """Berechnet aus Temperaturwerten einen 8-Bit-NTC-Code."""
@@ -29,7 +27,7 @@ class NtcSensor:
         (95.0, 1150.0),
         (100.0, 1090.0),
     ]
-    LSB_OHM = 250.0
+    LSB_OHM = 195.3
     CODE_MIN = 0
     CODE_MAX = 255
 
@@ -69,7 +67,7 @@ class NtcSensor:
         if widerstand_ohm < 0.0:
             code = self.CODE_MIN
         else:
-            code = int(math.ceil(widerstand_ohm / self.LSB_OHM))
+            code = int(round(widerstand_ohm / self.LSB_OHM))
 
         if code < self.CODE_MIN:
             return self.CODE_MIN

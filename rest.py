@@ -62,6 +62,7 @@ class RestServer:
         try:
             await writer.drain()
         finally:
+            writer.close()
             await writer.wait_closed()
 
     async def _verarbeite_http_anfrage(self, reader):
@@ -125,16 +126,16 @@ class RestServer:
 
     def _route_setze_temperatur(self, body_raw):
         """Verarbeitet PUT /sensors/temperature inklusive Validierung und Mapping."""
-        daten = self._parse_json_body(body_raw)
-        channel = self._hole_int_feld(daten, "channel")
-        if channel not in (1, 2):
-            return self._fehlerantwort(400, "BAD_REQUEST", "channel muss 1 oder 2 sein")
-
-        temperatur_c = self._hole_float_feld(daten, "temperature_c")
-        if temperatur_c < self.TEMPERATUR_MIN_C or temperatur_c > self.TEMPERATUR_MAX_C:
-            return self._fehlerantwort(400, "BAD_REQUEST", "temperature_c ausserhalb 0.0 bis 100.0")
-
         try:
+            daten = self._parse_json_body(body_raw)
+            channel = self._hole_int_feld(daten, "channel")
+            if channel not in (1, 2):
+                return self._fehlerantwort(400, "BAD_REQUEST", "channel muss 1 oder 2 sein")
+
+            temperatur_c = self._hole_float_feld(daten, "temperature_c")
+            if temperatur_c < self.TEMPERATUR_MIN_C or temperatur_c > self.TEMPERATUR_MAX_C:
+                return self._fehlerantwort(400, "BAD_REQUEST", "temperature_c ausserhalb 0.0 bis 100.0")
+
             ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c)
             self.output_driver.setze_ntc_code(ntc_code)
         except ValueError as exc:
@@ -155,12 +156,12 @@ class RestServer:
 
     def _route_setze_druck(self, body_raw):
         """Verarbeitet PUT /sensors/pressure inklusive Validierung und Mapping."""
-        daten = self._parse_json_body(body_raw)
-        pressure_pa = self._hole_float_feld(daten, "pressure_pa")
-        if pressure_pa < 0.0 or pressure_pa > 2452.0:
-            return self._fehlerantwort(400, "BAD_REQUEST", "pressure_pa ausserhalb 0.0 bis 2452.0")
-
         try:
+            daten = self._parse_json_body(body_raw)
+            pressure_pa = self._hole_float_feld(daten, "pressure_pa")
+            if pressure_pa < 0.0 or pressure_pa > 2452.0:
+                return self._fehlerantwort(400, "BAD_REQUEST", "pressure_pa ausserhalb 0.0 bis 2452.0")
+
             pwm_duty = self.pressure_sensor.verarbeite_druck_pa(pressure_pa)
             self.output_driver.setze_pwm_duty(pwm_duty)
         except ValueError as exc:
