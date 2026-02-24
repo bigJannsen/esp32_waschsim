@@ -8,7 +8,12 @@ import math
 
 
 class NtcSensor:
-    """NTC-Modell mit fester Kennlinie, Interpolation und Extrapolation."""
+    """NTC-Modell mit fester Kennlinie, Interpolation und Extrapolation.
+
+    Zweck:
+        Wandelt Temperaturwerte in Widerstand und anschließend in einen
+        8-Bit-Code um, ohne direkt auf Hardware zuzugreifen.
+    """
 
     KENNLINIE_NTC = [
         (0.0, 38000.0),
@@ -38,11 +43,31 @@ class NtcSensor:
     CODE_MAX = 255
 
     def __init__(self, output_treiber=None):
-        """Initialisiert den Sensor mit optionalem Ausgabetreiber."""
+        """Initialisiert den Sensor mit optionalem Ausgabetreiber.
+
+        Parameter:
+            output_treiber: Optionale Instanz eines OutputDriver.
+
+        Rueckgabewert:
+            None.
+
+        Seiteneffekte:
+            Speichert eine Referenz fuer die optionale Ausgabe.
+        """
         self.output_treiber = output_treiber
 
     def verarbeite_temperatur(self, temperatur_c):
-        """Verarbeitet eine Temperatur und liefert den quantisierten Code zurueck."""
+        """Verarbeitet eine Temperatur als float und liefert den NTC-Code.
+
+        Parameter:
+            temperatur_c (float): Temperatur in Grad Celsius.
+
+        Rueckgabewert:
+            int: Quantisierter NTC-Code im Bereich 0 bis 255.
+
+        Seiteneffekte:
+            Delegiert optional an OutputDriver.setze_ntc_code().
+        """
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         code = self.quantisierung_ohm_zu_code(widerstand_ohm)
 
@@ -52,12 +77,32 @@ class NtcSensor:
         return code
 
     def verarbeite_temperaturwert(self, temperatur_c):
-        """Abwaertskompatibler Alias fuer verarbeite_temperatur()."""
+        """Alias für verarbeite_temperatur() zur Kompatibilität.
+
+        Parameter:
+            temperatur_c (float): Temperatur in Grad Celsius.
+
+        Rueckgabewert:
+            int: Quantisierter NTC-Code.
+
+        Seiteneffekte:
+            Siehe verarbeite_temperatur().
+        """
         return self.verarbeite_temperatur(temperatur_c)
 
     def berechne_widerstand_ohm(self, temperatur_c):
-        """Berechnet den Widerstand in Ohm per linearer Interpolation/Extrapolation."""
-        temperatur_c = self._validiere_numerischen_wert(temperatur_c, "temperatur_c")
+        """Berechnet den NTC-Widerstand per linearer Interpolation.
+
+        Parameter:
+            temperatur_c (float): Temperatur in Grad Celsius.
+
+        Rueckgabewert:
+            float: Interpolierter oder extrapolierter Widerstand in Ohm.
+
+        Seiteneffekte:
+            Keine.
+        """
+        temperatur_c = self._validiere_float_wert(temperatur_c, "temperatur_c")
 
         kennlinie = self.KENNLINIE_NTC
 
@@ -80,8 +125,18 @@ class NtcSensor:
         raise ValueError("interner Fehler: keine gueltige Kennliniensegmentzuordnung")
 
     def quantisierung_ohm_zu_code(self, widerstand_ohm):
-        """Quantisiert den Widerstand mit 250-Ohm-LSB und begrenzt auf 8 Bit."""
-        widerstand_ohm = self._validiere_numerischen_wert(widerstand_ohm, "widerstand_ohm")
+        """Quantisiert den Widerstand mit 250-Ohm-LSB auf 8 Bit.
+
+        Parameter:
+            widerstand_ohm (float): Physikalischer Widerstand in Ohm.
+
+        Rueckgabewert:
+            int: NTC-Code im Bereich 0 bis 255.
+
+        Seiteneffekte:
+            Keine.
+        """
+        widerstand_ohm = self._validiere_float_wert(widerstand_ohm, "widerstand_ohm")
         if widerstand_ohm < 0.0:
             code = self.CODE_MIN
         else:
@@ -95,7 +150,19 @@ class NtcSensor:
 
     @staticmethod
     def _lineare_interpolation(x_wert, punkt_a, punkt_b):
-        """Interpoliert oder extrapoliert linear zwischen zwei Stuetzstellen."""
+        """Interpoliert oder extrapoliert linear zwischen zwei Stuetzstellen.
+
+        Parameter:
+            x_wert (float): Zielwert auf der x-Achse.
+            punkt_a (tuple): Erste Stuetzstelle (x, y).
+            punkt_b (tuple): Zweite Stuetzstelle (x, y).
+
+        Rueckgabewert:
+            float: Interpolierter y-Wert.
+
+        Seiteneffekte:
+            Keine.
+        """
         x_a, y_a = punkt_a
         x_b, y_b = punkt_b
 
@@ -106,15 +173,30 @@ class NtcSensor:
         return y_a + steigung * (x_wert - x_a)
 
     @staticmethod
-    def _validiere_numerischen_wert(wert, name):
-        """Validiert int/float-Eingaben und gibt sie als float zurueck."""
-        if not isinstance(wert, (int, float)):
-            raise ValueError("{} muss int oder float sein".format(name))
-        return float(wert)
+    def _validiere_float_wert(wert, name):
+        """Validiert physikalische Eingaben strikt als float.
+
+        Parameter:
+            wert (float): Zu pruefender physikalischer Wert.
+            name (str): Feldname fuer Fehlermeldungen.
+
+        Rueckgabewert:
+            float: Unveraenderter, gueltiger float-Wert.
+
+        Seiteneffekte:
+            Keine.
+        """
+        if isinstance(wert, bool) or not isinstance(wert, float):
+            raise ValueError("{} muss float sein".format(name))
+        return wert
 
 
 class PressureSensor:
-    """Drucksensormodell der Baureihe 2066.05xx mit linearer Duty-Berechnung."""
+    """Drucksensormodell der Baureihe 2066.05xx mit linearer Duty-Berechnung.
+
+    Zweck:
+        Wandelt Druckwerte in einen normierten PWM-Duty-Wert um.
+    """
 
     DRUCK_MIN_PA = 0.0
     DRUCK_MAX_PA = 2452.0
@@ -122,11 +204,31 @@ class PressureSensor:
     DUTY_MAX_NORM = 0.900
 
     def __init__(self, output_treiber=None):
-        """Initialisiert den Sensor mit optionalem Ausgabetreiber."""
+        """Initialisiert den Sensor mit optionalem Ausgabetreiber.
+
+        Parameter:
+            output_treiber: Optionale Instanz eines OutputDriver.
+
+        Rueckgabewert:
+            None.
+
+        Seiteneffekte:
+            Speichert eine Referenz fuer die optionale Ausgabe.
+        """
         self.output_treiber = output_treiber
 
     def verarbeite_druck_pa(self, druck_pa):
-        """Verarbeitet Druck in Pa und liefert den normierten Duty-Wert zurueck."""
+        """Verarbeitet Druck in Pascal und liefert den Duty-Wert.
+
+        Parameter:
+            druck_pa (float): Druck in Pascal.
+
+        Rueckgabewert:
+            float: Normierter PWM-Duty-Wert.
+
+        Seiteneffekte:
+            Delegiert optional an OutputDriver.setze_druck_pwm_normiert().
+        """
         duty_norm = self.berechne_duty_norm(druck_pa)
 
         if self.output_treiber is not None:
@@ -135,7 +237,17 @@ class PressureSensor:
         return duty_norm
 
     def berechne_duty_norm(self, druck_pa):
-        """Berechnet den normierten PWM-Duty-Wert gemaess Spezifikation."""
+        """Berechnet den normierten PWM-Duty-Wert gemaess Spezifikation.
+
+        Parameter:
+            druck_pa (float): Druck in Pascal.
+
+        Rueckgabewert:
+            float: Normierter Duty-Wert zwischen 0.233 und 0.900.
+
+        Seiteneffekte:
+            Keine.
+        """
         druck_pa = self._validiere_druck_pa(druck_pa)
 
         anteil = druck_pa / self.DRUCK_MAX_PA
@@ -143,24 +255,57 @@ class PressureSensor:
         return self.DUTY_MIN_NORM + anteil * span
 
     def _validiere_druck_pa(self, druck_pa):
-        """Validiert Typ und Wertebereich des Drucks in Pascal."""
-        if not isinstance(druck_pa, (int, float)):
-            raise ValueError("druck_pa muss int oder float sein")
+        """Validiert Typ und Wertebereich des Drucks in Pascal.
 
-        druck_pa_float = float(druck_pa)
-        if druck_pa_float < self.DRUCK_MIN_PA or druck_pa_float > self.DRUCK_MAX_PA:
+        Parameter:
+            druck_pa (float): Zu validierender Druck.
+
+        Rueckgabewert:
+            float: Gepruefter Druckwert.
+
+        Seiteneffekte:
+            Keine.
+        """
+        if isinstance(druck_pa, bool) or not isinstance(druck_pa, float):
+            raise ValueError("druck_pa muss float sein")
+
+        if druck_pa < self.DRUCK_MIN_PA or druck_pa > self.DRUCK_MAX_PA:
             raise ValueError("druck_pa ausserhalb des gueltigen Bereichs 0 bis 2452")
 
-        return druck_pa_float
+        return druck_pa
 
 
 class DruckSensorPwm(PressureSensor):
-    """Abwaertskompatible Klassenbezeichnung fuer bestehende Aufrufer."""
+    """Abwaertskompatible Klassenbezeichnung fuer bestehende Aufrufer.
+
+    Zweck:
+        Erhaelt bestehende Namenskonventionen und erweitert PressureSensor.
+    """
 
     def verarbeite_druckwert_pa(self, druck_pa):
-        """Abwaertskompatibler Alias fuer verarbeite_druck_pa()."""
+        """Alias für verarbeite_druck_pa() zur Kompatibilität.
+
+        Parameter:
+            druck_pa (float): Druck in Pascal.
+
+        Rueckgabewert:
+            float: Normierter Duty-Wert.
+
+        Seiteneffekte:
+            Siehe verarbeite_druck_pa().
+        """
         return self.verarbeite_druck_pa(druck_pa)
 
     def berechne_pwm_normiert(self, druck_pa):
-        """Abwaertskompatibler Alias fuer berechne_duty_norm()."""
+        """Alias für berechne_duty_norm() zur Kompatibilität.
+
+        Parameter:
+            druck_pa (float): Druck in Pascal.
+
+        Rueckgabewert:
+            float: Normierter Duty-Wert.
+
+        Seiteneffekte:
+            Keine.
+        """
         return self.berechne_duty_norm(druck_pa)

@@ -8,7 +8,12 @@ Dieses Modul enthaelt ausschliesslich:
 
 
 class OutputDriver:
-    """Bruecke zwischen berechneten Ausgangswerten und Hardwarezugriffen."""
+    """Bruecke zwischen berechneten Ausgangswerten und Hardwarezugriffen.
+
+    Zweck:
+        Entkoppelt Sensorlogik von Hardwarezugriffen und erhaelt die
+        einheitlichen Ausgabeschnittstellen.
+    """
 
     CODE_MIN = 0
     CODE_MAX = 255
@@ -18,14 +23,30 @@ class OutputDriver:
     DUTY_MAX_NORM = 0.900
 
     def __init__(self, hardware):
-        """Speichert die Hardware-Abstraktion als einzige IO-Schnittstelle."""
+        """Speichert die Hardware-Abstraktion als einzige IO-Schnittstelle.
+
+        Parameter:
+            hardware: Instanz mit setze_bitmaske() und setze_pwm_duty().
+
+        Rueckgabewert:
+            None.
+
+        Seiteneffekte:
+            Speichert die Referenz auf die Hardwareabstraktion.
+        """
         self.hardware = hardware
 
     def setze_ntc_code(self, code):
-        """Validiert den NTC-Code, bildet die Bitmaske und delegiert an Hardware.
+        """Validiert den NTC-Code und delegiert die resultierende Bitmaske.
 
-        Rueckgabe:
+        Parameter:
+            code (int): NTC-Code im Bereich 0 bis 255.
+
+        Rueckgabewert:
             int: Die gesetzte 8-Bit-Bitmaske.
+
+        Seiteneffekte:
+            Schreibt den Bitmaskenwert ueber die Hardwareabstraktion.
         """
         code_int = self._validiere_code(code)
         bitmaske = self.code_zu_bitmaske(code_int)
@@ -33,7 +54,17 @@ class OutputDriver:
         return bitmaske
 
     def code_zu_bitmaske(self, code):
-        """Wandelt einen gueltigen NTC-Code direkt in eine 8-Bit-Bitmaske um."""
+        """Wandelt einen gueltigen NTC-Code in eine 8-Bit-Bitmaske um.
+
+        Parameter:
+            code (int): NTC-Code im Bereich 0 bis 255.
+
+        Rueckgabewert:
+            int: 8-Bit-Bitmaske.
+
+        Seiteneffekte:
+            Keine.
+        """
         code_int = self._validiere_code(code)
         bitmaske = code_int & 0xFF
 
@@ -45,14 +76,16 @@ class OutputDriver:
     def setze_pwm_duty(self, duty, strikt=True, clampen=False):
         """Validiert und setzt den normierten PWM-Duty-Wert.
 
-        Args:
-            duty (float|int): Normierter Duty-Wert.
-            strikt (bool): Bei True gilt der Sensorspezifikationsbereich 0.233 bis 0.90.
-            clampen (bool): Bei True werden Grenzwertverletzungen explizit auf den
-                erlaubten Bereich begrenzt. Standard ist False (Fehler werfen).
+        Parameter:
+            duty (float): Normierter Duty-Wert.
+            strikt (bool): Bei True gilt der Sensorspezifikationsbereich.
+            clampen (bool): Bei True werden Grenzverletzungen begrenzt.
 
-        Rueckgabe:
+        Rueckgabewert:
             float: Der an die Hardware delegierte Duty-Wert.
+
+        Seiteneffekte:
+            Schreibt den Duty-Wert ueber die Hardwareabstraktion.
         """
         duty_normiert = self._validiere_duty_wert(
             duty,
@@ -63,11 +96,33 @@ class OutputDriver:
         return duty_normiert
 
     def setze_druck_pwm_normiert(self, duty_normiert, strikt=True, clampen=False):
-        """Abwaertskompatibler Alias fuer setze_pwm_duty()."""
+        """Alias fuer setze_pwm_duty() zur Kompatibilitaet.
+
+        Parameter:
+            duty_normiert (float): Normierter Duty-Wert.
+            strikt (bool): Bereichspruefung gemaess Sensorgrenzen.
+            clampen (bool): Optionales Begrenzen statt Fehler.
+
+        Rueckgabewert:
+            float: Delegierter Duty-Wert.
+
+        Seiteneffekte:
+            Siehe setze_pwm_duty().
+        """
         return self.setze_pwm_duty(duty_normiert, strikt=strikt, clampen=clampen)
 
     def _setze_hardware_bitmaske(self, bitmaske):
-        """Delegiert Bitmaske an eine kompatible Hardware-Methode."""
+        """Delegiert eine Bitmaske an kompatible Hardwaremethoden.
+
+        Parameter:
+            bitmaske (int): 8-Bit-Bitmaske.
+
+        Rueckgabewert:
+            None.
+
+        Seiteneffekte:
+            Ruft die Hardwareausgabe auf.
+        """
         if hasattr(self.hardware, "setze_bitmaske"):
             self.hardware.setze_bitmaske(bitmaske)
             return
@@ -82,7 +137,17 @@ class OutputDriver:
         )
 
     def _setze_hardware_pwm_duty(self, duty_normiert):
-        """Delegiert PWM-Duty an eine kompatible Hardware-Methode."""
+        """Delegiert einen Duty-Wert an kompatible Hardwaremethoden.
+
+        Parameter:
+            duty_normiert (float): Normierter Duty-Wert.
+
+        Rueckgabewert:
+            None.
+
+        Seiteneffekte:
+            Ruft die Hardwareausgabe auf.
+        """
         if hasattr(self.hardware, "setze_pwm_duty"):
             self.hardware.setze_pwm_duty(duty_normiert)
             return
@@ -101,7 +166,17 @@ class OutputDriver:
         )
 
     def _validiere_code(self, code):
-        """Validiert NTC-Code als Integer im Bereich 0 bis 255."""
+        """Validiert NTC-Code als Integer im Bereich 0 bis 255.
+
+        Parameter:
+            code (int|float): Ganzzahliger Wert fuer den Ausgabecode.
+
+        Rueckgabewert:
+            int: Gepruefter Code.
+
+        Seiteneffekte:
+            Keine.
+        """
         if isinstance(code, bool):
             raise ValueError("code muss int sein, bool ist nicht zulaessig")
 
@@ -120,11 +195,23 @@ class OutputDriver:
         return code_int
 
     def _validiere_duty_wert(self, duty, strikt=True, clampen=False):
-        """Validiert normierten PWM-Duty-Wert mit optionalem expliziten Clamp."""
-        if isinstance(duty, bool) or not isinstance(duty, (int, float)):
-            raise ValueError("duty muss int oder float sein")
+        """Validiert normierten PWM-Duty-Wert als physikalischen float.
 
-        duty_normiert = float(duty)
+        Parameter:
+            duty (float): Normierter Duty-Wert.
+            strikt (bool): Bereich 0.233 bis 0.900 wenn True.
+            clampen (bool): Optionales Begrenzen statt Fehler.
+
+        Rueckgabewert:
+            float: Gepruefter Duty-Wert.
+
+        Seiteneffekte:
+            Keine.
+        """
+        if isinstance(duty, bool) or not isinstance(duty, float):
+            raise ValueError("duty muss float sein")
+
+        duty_normiert = duty
 
         if duty_normiert < 0.0 or duty_normiert > 1.0:
             raise ValueError("duty ausserhalb des normierten Bereichs 0.0 bis 1.0")
@@ -145,9 +232,3 @@ class OutputDriver:
             raise ValueError("duty ausserhalb des erlaubten Bereichs")
 
         return duty_normiert
-
-
-# Audit-Zusammenfassung:
-# - Schichttreue bestaetigt: nur Validierung, Umwandlung und Delegation; keine Physik, kein machine.
-# - Schnittstellenkompatibilitaet bestaetigt: kompatibel zu sensors.py und geplanter hardware.py-Schnittstelle.
-# - Offene Punkte Stufe 4/5: finale hardware.py-Implementierung der Methoden setze_bitmaske/setze_pwm_duty.
