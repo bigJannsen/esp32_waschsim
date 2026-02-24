@@ -13,14 +13,18 @@ class SystemAnwendung:
         """Initialisiert Hardware, OutputDriver, Sensoren und REST-Server."""
         self.hardware = HardwareAbstraktion()
         self.output_treiber = OutputDriver(self.hardware)
-        self.ntc_sensor = NtcSensor(self.output_treiber)
-        self.druck_sensor = PressureSensor(self.output_treiber)
-        self.rest_server = RestServer(self.ntc_sensor, self.druck_sensor)
+        self.ntc_sensor = NtcSensor()
+        self.druck_sensor = PressureSensor()
+        self.rest_server = RestServer(
+            ntc_sensor=self.ntc_sensor,
+            pressure_sensor=self.druck_sensor,
+            output_driver=self.output_treiber,
+            hardware=self.hardware,
+        )
 
     def initialisiere_system(self):
-        """Initialisiert Hardware, AP-WLAN und Display."""
+        """Initialisiert Hardware und Display ohne WLAN-Konfiguration."""
         self.hardware.initialisiere_hardware()
-        self.hardware.konfiguriere_wlan_ap(ssid="miele", passwort="10000000")
         self.hardware.initialisiere_display()
 
     def starte_system(self):
@@ -29,7 +33,7 @@ class SystemAnwendung:
 
 
 def main():
-    """Startet die Firmware im AP-Betrieb."""
+    """Startet die Firmware."""
     anwendung = SystemAnwendung()
     anwendung.initialisiere_system()
     anwendung.starte_system()
