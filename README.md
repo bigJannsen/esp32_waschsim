@@ -1,187 +1,183 @@
-🔷 Stufe 9 – Erweiterung & Professionalisierung
-Ziel
+# 🚀 Stufe 9 – Erweiterung & Professionalisierung
+
+## 🎯 Ziel
 
 Nach erfolgreicher Implementierung von Stufe 1–8 wird das System technisch erweitert, strukturell professionalisiert und für reale Hardwarebedingungen optimiert.
 
-1️⃣ WLAN-Modus erweiterbar machen (AP + STA)
-Ziel:
+---
 
+## 1️⃣ WLAN-Modus erweiterbar machen (AP + STA)
+
+### Ziel
 Flexible Netzwerkanbindung.
 
-Umsetzung:
+### Umsetzung
+- Betriebsmodus konfigurierbar:
+  - `"AP"`
+  - `"STA"`
+  - `"AUTO"` (erst STA versuchen, sonst AP)
+- WLAN-Konfiguration persistent speicherbar
+- Keine Architekturänderung in `rest.py`
 
-Betriebsmodus konfigurierbar:
+### Begründung
+Erhöht reale Einsatzfähigkeit und Flexibilität im Testumfeld.
 
-"AP"
+---
 
-"STA"
+## 2️⃣ Sensor-Vererbungshierarchie einführen
 
-"AUTO" (erst STA versuchen, sonst AP)
+### Ziel
+Reduktion redundanter Logik und bessere Erweiterbarkeit.
 
-WLAN-Konfiguration persistent speicherbar
+### Strukturvorschlag
 
-Keine Architekturänderung in rest.py
-
-Begründung:
-
-Erhöht reale Einsatzfähigkeit.
-
-2️⃣ Sensor-Vererbungshierarchie einführen
-Ziel:
-
-Reduktion redundanter Logik.
-
-Strukturvorschlag:
+```python
 class SensorBasis:
-    - Validierung
-    - Bereichsprüfung
-    - Statusverwaltung
+    # Validierung
+    # Bereichsprüfung
+    # Statusverwaltung
 
 class AnalogerSensor(SensorBasis):
-    - Normierungsmethoden
+    # Normierungsmethoden
 
 class TemperaturSensor(AnalogerSensor)
 
 class NtcSensor(TemperaturSensor)
 
 class PressureSensor(AnalogerSensor)
-Nutzen:
+```
+### Nutzen
 
-Einheitliche Schnittstellen
+- Einheitliche Schnittstellen
 
-Weniger Duplikate
+- Weniger Code-Duplikate
 
-Saubere Erweiterbarkeit
+- Saubere Erweiterbarkeit
 
-3️⃣ DAC-basierte NTC-Simulation evaluieren
-Hintergrund:
+- Klare Verantwortlichkeiten
 
-Aktuell:
+## 3️⃣ DAC-basierte NTC-Simulation evaluieren
+### Hintergrund
 
-2x MCP4161 (50 kΩ)
+### Aktuell:
 
-Widerstandsquantisierung
+- 2× MCP4161 (50 kΩ)
 
-Zukunft:
+- Widerstandsquantisierung
 
-DAC mit Imax 2.5 mA
+### Zukünftig:
 
-Direkte Spannungssteuerung
+- DAC mit Imax 2.5 mA
 
-Ziel:
+- Direkte Spannungssteuerung
 
-Genauere Simulation
+### Ziel
 
-Weniger Quantisierungsfehler
+- Genauere Simulation
 
-Vereinfachte Hardware
+- Weniger Quantisierungsfehler
 
-4️⃣ Rampen- und Zeitverhalten implementieren
-Ziel:
+- Vereinfachte Hardware
 
-Realistische Sensorverläufe.
+## 4️⃣ Rampen- und Zeitverhalten implementieren
+### Ziel
 
-Features:
+- Realistische Sensorverläufe.
 
-Temperatur-Rampe
+ -Features
 
-Zeitkonstante
+- Temperatur-Rampe
 
-Aufheiz- / Abkühlmodell
+- Zeitkonstante
 
-Periodische Aktualisierung
+- Aufheiz- / Abkühlmodell
 
-5️⃣ HTTPS-Unterstützung (optional)
-Ziel:
+- Periodische Aktualisierung (async-basiert)
+
+## 5️⃣ HTTPS-Unterstützung (optional)
+### Ziel
 
 Sichere REST-Kommunikation.
 
-Umsetzung:
+Umsetzung
 
 SSL-Kontext
 
 Optional aktivierbar
 
-Nur bei STA sinnvoll
+Besonders sinnvoll im STA-Modus
 
-6️⃣ Logging-Subsystem
-Ziel:
+## 6️⃣ Logging-Subsystem
+### Ziel
 
-Diagnosefähigkeit erhöhen.
+Erhöhte Diagnosefähigkeit.
 
-Features:
+Features
 
 Log-Level (INFO / WARN / ERROR)
 
-Optional seriell ausgebbar
+Optionale serielle Ausgabe
 
-Keine Performance-Beeinträchtigung
+Kein Performance-Overhead im Normalbetrieb
 
-7️⃣ Integrationstest-Automatisierung
-Ziel:
+## 7️⃣ Integrationstest-Automatisierung
+### Ziel
 
-Wiederholbare Tests.
+- Wiederholbare und reproduzierbare Tests.
 
-Features:
+- Features
 
-Test-Suite für:
+### Test-Suite für:
 
-Temperaturpfad
+- Temperaturpfad
 
-Druckpfad
+- Druckpfad
 
-Persistenz
+- Persistenz
 
-Fehlerfälle
+- Fehlerfälle
 
-Optional CI-kompatibel
+- Optional CI-kompatibel (z. B. GitHub Actions)
 
-8️⃣ Elektrische Validierung & Kalibrierung
-Ziel:
+## 8️⃣ Elektrische Validierung & Kalibrierung
+### Ziel
 
-Physikalische Genauigkeit erhöhen.
+- Physikalische Genauigkeit erhöhen.
 
-Maßnahmen:
+### Maßnahmen
 
-Messung gegen reale NTC
+- Messung gegen reale NTC
 
-Fehleranalyse (Quantisierung)
+- Fehleranalyse (Quantisierung)
 
-LSB-Optimierung
+- LSB-Optimierung
 
-ggf. Nichtlinearitätskorrektur
+- ggf. Nichtlinearitätskorrektur
 
-9️⃣ Performance- und Speicheroptimierung
-Ziel:
+## 9️⃣ Performance- und Speicheroptimierung
+### Ziel
 
-Stabilität im Dauerbetrieb.
+- Stabilität im Dauerbetrieb.
 
-Prüfung:
+### Prüfpunkte
 
-Heap-Nutzung
+- Heap-Nutzung
 
-Event-Loop-Stabilität
+- Event-Loop-Stabilität
 
-Flash-Schreibzyklen
+- Flash-Schreibzyklen
 
-RAM-Leaks
+- RAM-Leaks
 
-🔷 Aktueller Stand
-Bereich	Status
-Architektur	✔
-Async REST	✔
-Persistenz	✔
-Digipot-Integration	✔
-End-to-End-Test	✔
-Vererbung	🔜
-WLAN-Fallback	🔜
-DAC-Option	🔜
-🔷 Langfristige Vision
+- SPI-Timing-Stabilität
 
-ESP32 Waschsim als:
-
-Modularer Sensoremulator
-
-REST-basiertes Testgerät
-
-Hardwareunabhängige Simulationsplattform
+## 📊 Aktueller Projektstatus
+### Bereich	Status
+- Architektur	✅
+- Async REST	✅
+- Persistenz	✅
+- Digipot-Integration	✅
+- End-to-End-Test	✅
+- Vererbung	🔜
+- WLAN-Fallback	🔜
+- DAC-Option	🔜
