@@ -4,7 +4,6 @@ import network
 import uasyncio as asyncio
 
 from hardware import HardwareAbstraktion
-from output_driver import OutputDriver
 from rest import RestServer
 from sensors import NtcSensor, PressureSensor
 
@@ -18,13 +17,11 @@ class SystemAnwendung:
     def __init__(self):
         """Initialisiert alle Schicht-Komponenten fuer den Laufzeitstart."""
         self.hardware = HardwareAbstraktion()
-        self.ntc_sensor = NtcSensor()
-        self.druck_sensor = PressureSensor()
-        self.output_treiber = OutputDriver(self.hardware)
+        self.ntc_sensor = NtcSensor(hardware=self.hardware)
+        self.druck_sensor = PressureSensor(hardware=self.hardware)
         self.rest_server = RestServer(
             ntc_sensor=self.ntc_sensor,
             pressure_sensor=self.druck_sensor,
-            output_driver=self.output_treiber,
             hardware=self.hardware,
         )
         self.ap_wlan = network.WLAN(network.AP_IF)
