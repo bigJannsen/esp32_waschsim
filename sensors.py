@@ -1,4 +1,4 @@
-"""Fachliche Sensorlogik ohne Hardwarezugriffe."""
+"""Fachliche Sensorlogik mit direkter Hardwareansteuerung."""
 
 
 class NtcSensor:
@@ -31,16 +31,16 @@ class NtcSensor:
     CODE_MIN = 0
     CODE_MAX = 255
 
-    def __init__(self, output_treiber=None):
-        """Initialisiert den Sensor mit optionalem OutputDriver."""
-        self.output_treiber = output_treiber
+    def __init__(self, hardware=None):
+        """Initialisiert den Sensor mit optionaler Hardwareabstraktion."""
+        self.hardware = hardware
 
     def verarbeite_temperatur(self, temperatur_c):
         """Verarbeitet einen Temperaturwert (float) und liefert den NTC-Code."""
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         code = self.quantisierung_ohm_zu_code(widerstand_ohm)
-        if self.output_treiber is not None:
-            self.output_treiber.setze_ntc_code(code)
+        if self.hardware is not None:
+            self.hardware.setze_ntc_code(code)
         return code
 
     def berechne_widerstand_ohm(self, temperatur_c):
@@ -100,15 +100,15 @@ class PressureSensor:
     DUTY_MIN_NORM = 0.233
     DUTY_MAX_NORM = 0.900
 
-    def __init__(self, output_treiber=None):
-        """Initialisiert den Sensor mit optionalem OutputDriver."""
-        self.output_treiber = output_treiber
+    def __init__(self, hardware=None):
+        """Initialisiert den Sensor mit optionaler Hardwareabstraktion."""
+        self.hardware = hardware
 
     def verarbeite_druck_pa(self, druck_pa):
         """Verarbeitet einen Druckwert (float) und liefert den Duty-Wert."""
         duty_norm = self.berechne_duty_norm(druck_pa)
-        if self.output_treiber is not None:
-            self.output_treiber.setze_pwm_duty(duty_norm)
+        if self.hardware is not None:
+            self.hardware.setze_pwm_duty(duty_norm)
         return duty_norm
 
     def berechne_duty_norm(self, druck_pa):

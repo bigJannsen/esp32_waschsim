@@ -5,23 +5,16 @@ import os
 
 
 class _MockBackend:
-    """Simuliertes Hardware-Backend ohne externe Abhaengigkeiten.
-
-    Verantwortlichkeit:
-    - Speichern der zuletzt gesetzten Hardwarewerte fuer Diagnosen.
-
-    Abgrenzung:
-    - Keine Sensorphysik, keine Netzwerklogik, keine echte Peripherie.
-    """
+    """Simuliertes Hardware-Backend ohne externe Abhaengigkeiten."""
 
     def __init__(self):
         """Erzeugt den initialen Mock-Zustand."""
-        self.letzte_bitmaske = 0
+        self.letzter_ntc_code = 0
         self.letztes_pwm_duty = 0.0
 
-    def setze_bitmaske(self, bitmaske):
-        """Speichert die Bitmaske im Mock-Zustand."""
-        self.letzte_bitmaske = bitmaske
+    def setze_ntc_code(self, ntc_code):
+        """Speichert den NTC-Code im Mock-Zustand."""
+        self.letzter_ntc_code = ntc_code
 
     def setze_pwm_duty(self, duty):
         """Speichert den PWM-Duty im Mock-Zustand."""
@@ -29,46 +22,31 @@ class _MockBackend:
 
 
 class _RealBackend:
-    """Optionales Hardware-Backend fuer echte Peripherieobjekte.
-
-    Verantwortlichkeit:
-    - Delegation an von aussen bereitgestellte Pin-/PWM-Objekte.
-
-    Abgrenzung:
-    - Keine Default-Pins und keine hardcodierten Board-Layouts.
-    """
+    """Optionales Hardware-Backend fuer echte Peripherieobjekte."""
 
     def __init__(self, **konfiguration):
-        """Initialisiert das reale Backend mit externer Konfiguration.
-
-        Parameter:
-            **konfiguration: Erwartet optional "bitmaske_setzer" und "pwm_setzer".
-
-        Raises:
-            ValueError: Wenn ein uebergebenes Setzer-Objekt nicht aufrufbar ist.
-        """
+        """Initialisiert das reale Backend mit externer Konfiguration."""
         try:
             __import__("machine")
         except ImportError:
-            # Keine harte Abhaengigkeit: Reales Backend kann auch mit Mock-Objekten laufen.
             pass
 
-        self._bitmaske_setzer = konfiguration.get("bitmaske_setzer")
+        self._ntc_code_setzer = konfiguration.get("ntc_code_setzer")
         self._pwm_setzer = konfiguration.get("pwm_setzer")
 
-        if self._bitmaske_setzer is not None and not callable(self._bitmaske_setzer):
-            raise ValueError("bitmaske_setzer muss aufrufbar sein")
+        if self._ntc_code_setzer is not None and not callable(self._ntc_code_setzer):
+            raise ValueError("ntc_code_setzer muss aufrufbar sein")
         if self._pwm_setzer is not None and not callable(self._pwm_setzer):
             raise ValueError("pwm_setzer muss aufrufbar sein")
 
-        self.letzte_bitmaske = 0
+        self.letzter_ntc_code = 0
         self.letztes_pwm_duty = 0.0
 
-    def setze_bitmaske(self, bitmaske):
-        """Delegiert die Bitmaske an die konfigurierte reale Ausgabe."""
-        if self._bitmaske_setzer is not None:
-            self._bitmaske_setzer(bitmaske)
-        self.letzte_bitmaske = bitmaske
+    def setze_ntc_code(self, ntc_code):
+        """Delegiert den NTC-Code an die konfigurierte reale Ausgabe."""
+        if self._ntc_code_setzer is not None:
+            self._ntc_code_setzer(ntc_code)
+        self.letzter_ntc_code = ntc_code
 
     def setze_pwm_duty(self, duty):
         """Delegiert den PWM-Duty an die konfigurierte reale Ausgabe."""
@@ -78,35 +56,12 @@ class _RealBackend:
 
 
 class HardwareAbstraktion:
-    """Hardware-nahe Abstraktion fuer Aktor-Ausgaben.
-
-    Verantwortlichkeit:
-    - Validierung und Weitergabe von Bitmasken- und PWM-Werten.
-    - Bereitstellung eines diagnostischen, nebenwirkungsarmen Status.
-    - Robuste Persistenz relevanter Zustandsdaten in "config.json".
-
-    Abgrenzung:
-    - Keine Sensorphysik, keine Interpolation, keine REST-/Request-Verarbeitung.
-    - Keine Netzwerklogik.
-    """
+    """Hardware-nahe Abstraktion fuer Aktor-Ausgaben."""
 
     _KONFIG_DATEINAME = "config.json"
 
     def __init__(self, backend="mock", **konfiguration):
-        """Erzeugt die HardwareAbstraktion mit Mock- oder Real-Backend.
-
-        Parameter:
-            backend (str): "mock" fuer simulationsfaehigen Betrieb oder "real" fuer
-                explizit konfigurierten Zugriff auf reale Ausgabeobjekte.
-            **konfiguration: Backend-spezifische Konfigurationswerte.
-
-        Raises:
-            ValueError: Wenn ein ungueltiger Backend-Name angegeben wird.
-
-        Fehlerstrategie:
-            - Bei fehlender/korrupten Konfiguration werden sichere Defaults genutzt.
-            - Persistenzfehler fuehren nicht zum Absturz, sondern setzen Statusdaten.
-        """
+        """Erzeugt die HardwareAbstraktion mit Mock- oder Real-Backend."""
         if backend == "mock":
             self._backend = _MockBackend()
         elif backend == "real":
@@ -122,7 +77,6 @@ class HardwareAbstraktion:
             "letztes_pwm_duty": 0.0,
             "letzter_status_ok": True,
             "letzter_status_text": "OK",
-            "letzte_bitmaske": 0,
         }
         self._persistenz_daten = dict(self._persistenz_defaults)
         self._letzte_gespeicherte_konfiguration = None
@@ -131,59 +85,20 @@ class HardwareAbstraktion:
         self.wende_konfiguration_an(geladene_konfiguration)
 
     def initialisiere_hardware(self):
-        """Kompatibilitaetsmethode ohne Initialisierungsarbeit.
-
-        Rueckgabe:
-            None
-
-        Seiteneffekte:
-            Keine. Die Methode bleibt fuer bestehende Aufrufer aus frueheren Stufen erhalten.
-        """
+        """Kompatibilitaetsmethode ohne Initialisierungsarbeit."""
         return None
 
     def konfiguriere_wlan_ap(self, ssid, passwort):
-        """Kompatibilitaetsmethode fuer fruehere Stufen ohne WLAN-Implementierung.
-
-        Parameter:
-            ssid (str): Wird ignoriert.
-            passwort (str): Wird ignoriert.
-
-        Rueckgabe:
-            None
-
-        Seiteneffekte:
-            Keine.
-        """
+        """Kompatibilitaetsmethode fuer fruehere Stufen ohne WLAN-Implementierung."""
         _ = (ssid, passwort)
         return None
 
     def initialisiere_display(self):
-        """Kompatibilitaetsmethode fuer fruehere Stufen ohne Display-Implementierung.
-
-        Rueckgabe:
-            None
-
-        Seiteneffekte:
-            Keine.
-        """
+        """Kompatibilitaetsmethode fuer fruehere Stufen ohne Display-Implementierung."""
         return None
 
     def _normalisiere_konfiguration(self, daten):
-        """Validiert und normalisiert persistierte Konfigurationsdaten.
-
-        Parameter:
-            daten (dict): Rohdaten aus Aufrufern oder aus der JSON-Datei.
-
-        Rueckgabe:
-            dict: Vollstaendig typisierte Konfiguration inklusive Defaults.
-
-        Raises:
-            ValueError: Wenn "daten" kein Dictionary ist oder Felder nicht typisiert werden koennen.
-
-        Fehlerstrategie:
-            - Harte Validierungsfehler werden als ValueError gemeldet,
-              damit Aufrufer gezielt auf Defaults zurueckfallen koennen.
-        """
+        """Validiert und normalisiert persistierte Konfigurationsdaten."""
         if not isinstance(daten, dict):
             raise ValueError("konfiguration muss ein dict sein")
 
@@ -219,28 +134,15 @@ class HardwareAbstraktion:
                 raise ValueError("letzter_status_text muss str sein")
             normalisiert["letzter_status_text"] = daten["letzter_status_text"]
 
-        if "letzte_bitmaske" in daten:
-            if isinstance(daten["letzte_bitmaske"], bool):
-                raise ValueError("letzte_bitmaske darf kein bool sein")
-            normalisiert["letzte_bitmaske"] = int(daten["letzte_bitmaske"])
-
-        if normalisiert["letzte_bitmaske"] < 0 or normalisiert["letzte_bitmaske"] > 255:
-            raise ValueError("letzte_bitmaske muss im Bereich 0 bis 255 liegen")
+        if normalisiert["letzter_ntc_code"] < 0 or normalisiert["letzter_ntc_code"] > 255:
+            raise ValueError("letzter_ntc_code muss im Bereich 0 bis 255 liegen")
         if normalisiert["letztes_pwm_duty"] < 0.0 or normalisiert["letztes_pwm_duty"] > 1.0:
             raise ValueError("letztes_pwm_duty muss im Bereich 0.0 bis 1.0 liegen")
 
         return normalisiert
 
     def lade_konfiguration(self):
-        """Laedt und validiert die persistierte Konfiguration aus "config.json".
-
-        Rueckgabe:
-            dict: Validierte Konfiguration oder sichere Defaults bei Fehlern.
-
-        Fehlerstrategie:
-            - Bei fehlender Datei, korruptem JSON oder Typfehlern werden Defaults genutzt.
-            - Der Fehlerzustand wird in den Rueckgabedaten markiert, das System laeuft weiter.
-        """
+        """Laedt und validiert die persistierte Konfiguration aus 'config.json'."""
         defaults = dict(self._persistenz_defaults)
         try:
             with open(self._KONFIG_DATEINAME, "r", encoding="utf-8") as datei:
@@ -260,22 +162,7 @@ class HardwareAbstraktion:
             return defaults
 
     def speichere_konfiguration(self, daten):
-        """Speichert Konfigurationsdaten robust und flash-schonend.
-
-        Parameter:
-            daten (dict): Zu persistierende Daten.
-
-        Rueckgabe:
-            None
-
-        Raises:
-            Keine.
-
-        Fehlerstrategie:
-            - Schreiben erfolgt nur bei Aenderung gegenueber letzter Speicherung.
-            - Bei ValueError/OSError wird nicht abgebrochen; Status wird auf Persistenzfehler gesetzt.
-            - Teilwrites werden durch temp-Datei und atomisches Ersetzen vermieden.
-        """
+        """Speichert Konfigurationsdaten robust und flash-schonend."""
         try:
             normalisiert = self._normalisiere_konfiguration(daten)
         except (ValueError, TypeError):
@@ -303,18 +190,7 @@ class HardwareAbstraktion:
         return None
 
     def wende_konfiguration_an(self, daten):
-        """Uebertraegt geladene Konfigurationswerte deterministisch in den Laufzeitzustand.
-
-        Parameter:
-            daten (dict): Konfigurationsdaten aus Persistenz oder Defaults.
-
-        Rueckgabe:
-            None
-
-        Fehlerstrategie:
-            - Ungueltige Eingabedaten werden auf sichere Defaults zurueckgesetzt.
-            - Es werden ausschliesslich validierte Werte an setze_bitmaske/setze_pwm_duty weitergegeben.
-        """
+        """Uebertraegt geladene Konfigurationswerte deterministisch in den Laufzeitzustand."""
         try:
             normalisiert = self._normalisiere_konfiguration(daten)
         except (ValueError, TypeError):
@@ -323,52 +199,24 @@ class HardwareAbstraktion:
             normalisiert["letzter_status_text"] = "Konfiguration ungueltig"
 
         self._persistenz_daten = dict(normalisiert)
-        self.setze_bitmaske(normalisiert["letzte_bitmaske"])
+        self.setze_ntc_code(normalisiert["letzter_ntc_code"])
         self.setze_pwm_duty(normalisiert["letztes_pwm_duty"])
 
-    def setze_bitmaske(self, bitmaske):
-        """Setzt eine Ausgabebitmaske mit strikt integerbasierter Validierung.
+    def setze_ntc_code(self, ntc_code):
+        """Setzt den NTC-Code mit strikt integerbasierter Validierung."""
+        if isinstance(ntc_code, bool) or not isinstance(ntc_code, int):
+            raise ValueError("ntc_code muss int sein")
+        if ntc_code < 0 or ntc_code > 255:
+            raise ValueError("ntc_code muss im Bereich 0 bis 255 liegen")
 
-        Parameter:
-            bitmaske (int): Wert im Bereich 0 bis 255.
-
-        Rueckgabe:
-            None
-
-        Raises:
-            ValueError: Wenn Typ oder Wertebereich ungueltig sind.
-
-        Seiteneffekte:
-            Aktualisiert den internen Backend-Zustand bzw. delegiert an reale Setzer.
-            Bei Erfolg wird die persistierbare Konfiguration write-on-change gespeichert.
-        """
-        if isinstance(bitmaske, bool) or not isinstance(bitmaske, int):
-            raise ValueError("bitmaske muss int sein")
-        if bitmaske < 0 or bitmaske > 255:
-            raise ValueError("bitmaske muss im Bereich 0 bis 255 liegen")
-
-        self._backend.setze_bitmaske(bitmaske)
-        self._persistenz_daten["letzte_bitmaske"] = bitmaske
+        self._backend.setze_ntc_code(ntc_code)
+        self._persistenz_daten["letzter_ntc_code"] = ntc_code
         self._persistenz_daten["letzter_status_ok"] = True
         self._persistenz_daten["letzter_status_text"] = "OK"
         self.speichere_konfiguration(self._persistenz_daten)
 
     def setze_pwm_duty(self, duty):
-        """Setzt den normierten PWM-Duty-Wert als float.
-
-        Parameter:
-            duty (float): Normierter Wert im Bereich 0.0 bis 1.0.
-
-        Rueckgabe:
-            None
-
-        Raises:
-            ValueError: Wenn Typ oder Wertebereich ungueltig sind.
-
-        Seiteneffekte:
-            Aktualisiert den internen Backend-Zustand bzw. delegiert an reale Setzer.
-            Bei Erfolg wird die persistierbare Konfiguration write-on-change gespeichert.
-        """
+        """Setzt den normierten PWM-Duty-Wert als float."""
         if isinstance(duty, bool) or not isinstance(duty, float):
             raise ValueError("duty muss float sein")
         if duty < 0.0 or duty > 1.0:
@@ -381,33 +229,18 @@ class HardwareAbstraktion:
         self.speichere_konfiguration(self._persistenz_daten)
 
     def lese_status(self):
-        """Liefert den diagnostischen Hardwarestatus ohne zusaetzliche I/O.
-
-        Rueckgabe:
-            dict: Enthalten sind Backend- und Persistenzstatusinformationen.
-
-        Seiteneffekte:
-            Keine.
-        """
+        """Liefert den diagnostischen Hardwarestatus ohne zusaetzliche I/O."""
         return {
             "backend": self._backend_name,
-            "letzte_bitmaske": self._backend.letzte_bitmaske,
+            "letzter_ntc_code": self._backend.letzter_ntc_code,
             "letztes_pwm_duty": self._backend.letztes_pwm_duty,
             "letzte_temperatur_c": self._persistenz_daten["letzte_temperatur_c"],
-            "letzter_ntc_code": self._persistenz_daten["letzter_ntc_code"],
             "letzter_druck_pa": self._persistenz_daten["letzter_druck_pa"],
             "letzter_status_ok": self._persistenz_daten["letzter_status_ok"],
             "letzter_status_text": self._persistenz_daten["letzter_status_text"],
         }
 
     def setze_sicheren_zustand(self):
-        """Setzt die Ausgaenge deterministisch auf einen sicheren Zustand.
-
-        Rueckgabe:
-            None
-
-        Seiteneffekte:
-            Setzt Bitmaske auf 0 und PWM-Duty auf 0.0 ueber die oeffentlichen Methoden.
-        """
-        self.setze_bitmaske(0)
+        """Setzt die Ausgaenge deterministisch auf einen sicheren Zustand."""
+        self.setze_ntc_code(0)
         self.setze_pwm_duty(0.0)

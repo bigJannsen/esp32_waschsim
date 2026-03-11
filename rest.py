@@ -15,20 +15,10 @@ class RestServer:
     TEMPERATUR_MIN_C = 0.0
     TEMPERATUR_MAX_C = 100.0
 
-    def __init__(self, ntc_sensor, pressure_sensor, output_driver, hardware, host="0.0.0.0", port=8080):
-        """Initialisiert den REST-Server mit allen benoetigten Abhaengigkeiten.
-
-        Args:
-            ntc_sensor: Sensorlogik fuer Temperaturverarbeitung.
-            pressure_sensor: Sensorlogik fuer Druckverarbeitung.
-            output_driver: Ausgabeschicht fuer NTC-Code und PWM-Duty.
-            hardware: HardwareAbstraktion fuer den Status-Endpunkt.
-            host (str): Bind-Adresse des Servers.
-            port (int): TCP-Port des Servers.
-        """
+    def __init__(self, ntc_sensor, pressure_sensor, hardware, host="0.0.0.0", port=8080):
+        """Initialisiert den REST-Server mit allen benoetigten Abhaengigkeiten."""
         self.ntc_sensor = ntc_sensor
         self.pressure_sensor = pressure_sensor
-        self.output_driver = output_driver
         self.hardware = hardware
         self.host = host
         self.port = port
@@ -137,7 +127,6 @@ class RestServer:
                 return self._fehlerantwort(400, "BAD_REQUEST", "temperature_c ausserhalb 0.0 bis 100.0")
 
             ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c)
-            self.output_driver.setze_ntc_code(ntc_code)
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
 
@@ -163,7 +152,6 @@ class RestServer:
                 return self._fehlerantwort(400, "BAD_REQUEST", "pressure_pa ausserhalb 0.0 bis 2452.0")
 
             pwm_duty = self.pressure_sensor.verarbeite_druck_pa(pressure_pa)
-            self.output_driver.setze_pwm_duty(pwm_duty)
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
 
