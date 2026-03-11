@@ -30,14 +30,16 @@ class _MockBackend:
             self.letzter_ntc_code_kanal_2 = code
         self.letzter_ntc_code = code
 
+    def _write_code_auf_beide_digipots(self, code):
+        """Schreibt denselben NTC-Code auf beide simulierten Digipot-Kanaele."""
+        self.write_digipot(1, code)
+        self.write_digipot(2, code)
+        self.letzter_ntc_code = code
+
     def write_ntc_code(self, ntc_code):
         """Schreibt denselben NTC-Code auf beide simulierten Digipot-Kanaele."""
-        self.write_digipot(1, ntc_code)
-        self.write_digipot(2, ntc_code)
-
-    def setze_ntc_code(self, ntc_code):
-        """Kompatibilitaetsmethode fuer bestehende Aufrufe."""
-        self.write_ntc_code(ntc_code)
+        code = max(0, min(255, int(ntc_code)))
+        self._write_code_auf_beide_digipots(code)
 
     def setze_pwm_duty(self, duty):
         """Speichert den PWM-Duty im Mock-Zustand."""
@@ -54,7 +56,7 @@ class _RealBackend:
     DIGIPOT_SPI_SCK = 14
     DIGIPOT_SPI_MOSI = 13
     DIGIPOT_SPI_MISO = 12
-    DIGIPOT_WRITE_WIPER_0 = 0x00
+    DIGIPOT_CMD_WRITE_WIPER_0 = 0x00
 
     def __init__(self, **konfiguration):
         """Initialisiert das reale Backend mit externer Konfiguration."""
@@ -122,21 +124,21 @@ class _RealBackend:
 
         if self._spi is not None and cs_pin is not None:
             cs_pin.value(0)
-            self._spi.write(bytes((self.DIGIPOT_WRITE_WIPER_0, code)))
+            self._spi.write(bytes((self.DIGIPOT_CMD_WRITE_WIPER_0, code)))
             cs_pin.value(1)
+
+    def _write_code_auf_beide_digipots(self, code):
+        """Schreibt denselben NTC-Code auf beide MCP4161-Digipots."""
+        self.write_digipot(1, code)
+        self.write_digipot(2, code)
+        self.letzter_ntc_code = code
 
     def write_ntc_code(self, ntc_code):
         """Schreibt denselben NTC-Code auf beide MCP4161-Digipots."""
         code = self._clamp_code(int(ntc_code))
         if self._ntc_code_setzer is not None:
             self._ntc_code_setzer(code)
-        self.write_digipot(1, code)
-        self.write_digipot(2, code)
-        self.letzter_ntc_code = code
-
-    def setze_ntc_code(self, ntc_code):
-        """Delegiert den NTC-Code an die konfigurierte reale Ausgabe."""
-        self.write_ntc_code(ntc_code)
+        self._write_code_auf_beide_digipots(code)
 
     def setze_pwm_duty(self, duty):
         """Delegiert den PWM-Duty an die konfigurierte reale Ausgabe."""
@@ -299,7 +301,7 @@ class HardwareAbstraktion:
         if ntc_code < 0 or ntc_code > 255:
             raise ValueError("ntc_code muss im Bereich 0 bis 255 liegen")
 
-        self.write_ntc_code(ntc_code)
+        self._backend.write_ntc_code(ntc_code)
         self._persistenz_daten["letzter_ntc_code"] = ntc_code
         self._persistenz_daten["letzter_status_ok"] = True
         self._persistenz_daten["letzter_status_text"] = "OK"
@@ -316,17 +318,6 @@ class HardwareAbstraktion:
         elif code > 255:
             code = 255
         self._backend.write_digipot(channel, code)
-        self._persistenz_daten["letzter_ntc_code"] = code
-
-    def write_ntc_code(self, code):
-        """Schreibt denselben Code auf beide MCP4161-Digipots."""
-        if isinstance(code, bool) or not isinstance(code, int):
-            raise ValueError("code muss int sein")
-        if code < 0:
-            code = 0
-        elif code > 255:
-            code = 255
-        self._backend.write_ntc_code(code)
 
     def setze_pwm_duty(self, duty):
         """Setzt den normierten PWM-Duty-Wert als float."""
