@@ -31,8 +31,6 @@ class NtcSensor:
     DIGIPOT_CODE_MIN = 0
     DIGIPOT_CODE_MAX = 255
     DIGIPOT_CODE_INVERTIERT = False
-    CODE_MIN = 0
-    CODE_MAX = 255
 
     def __init__(self, hardware=None):
         """Initialisiert den Sensor mit optionaler Hardwareabstraktion."""
@@ -43,7 +41,7 @@ class NtcSensor:
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         code = self.quantisierung_ohm_zu_code(widerstand_ohm)
         if self.hardware is not None:
-            self.hardware.write_ntc_code(code)
+            self.hardware.setze_ntc_code(code)
         return code
 
     def berechne_widerstand_ohm(self, temperatur_c):
