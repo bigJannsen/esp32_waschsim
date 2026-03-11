@@ -27,7 +27,10 @@ class NtcSensor:
         (95.0, 1150.0),
         (100.0, 1090.0),
     ]
-    LSB_OHM = 195.3
+    DIGIPOT_MAX_RESISTANCE = 50000.0
+    DIGIPOT_CODE_MIN = 0
+    DIGIPOT_CODE_MAX = 255
+    DIGIPOT_CODE_INVERTIERT = False
     CODE_MIN = 0
     CODE_MAX = 255
 
@@ -40,7 +43,7 @@ class NtcSensor:
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         code = self.quantisierung_ohm_zu_code(widerstand_ohm)
         if self.hardware is not None:
-            self.hardware.setze_ntc_code(code)
+            self.hardware.write_ntc_code(code)
         return code
 
     def berechne_widerstand_ohm(self, temperatur_c):
@@ -64,15 +67,16 @@ class NtcSensor:
     def quantisierung_ohm_zu_code(self, widerstand_ohm):
         """Quantisiert einen Widerstand (float) auf einen 8-Bit-Code."""
         widerstand_ohm = self._validiere_float_wert(widerstand_ohm, "widerstand_ohm")
-        if widerstand_ohm < 0.0:
-            code = self.CODE_MIN
-        else:
-            code = int(round(widerstand_ohm / self.LSB_OHM))
+        code = int(round((widerstand_ohm / self.DIGIPOT_MAX_RESISTANCE) * self.DIGIPOT_CODE_MAX))
 
-        if code < self.CODE_MIN:
-            return self.CODE_MIN
-        if code > self.CODE_MAX:
-            return self.CODE_MAX
+        if code < self.DIGIPOT_CODE_MIN:
+            code = self.DIGIPOT_CODE_MIN
+        elif code > self.DIGIPOT_CODE_MAX:
+            code = self.DIGIPOT_CODE_MAX
+
+        if self.DIGIPOT_CODE_INVERTIERT:
+            code = self.DIGIPOT_CODE_MAX - code
+
         return code
 
     @staticmethod
