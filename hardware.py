@@ -1,49 +1,7 @@
-"""Hardware-nahe Abstraktionsschicht mit austauschbaren Backends."""
+"""Hardware-nahe Abstraktionsschicht fuer die produktive Laufzeit."""
 
 import json
 import os
-
-
-class _MockBackend:
-    """Simuliertes Hardware-Backend ohne externe Abhaengigkeiten."""
-
-    def __init__(self):
-        """Erzeugt den initialen Mock-Zustand."""
-        self.letzter_ntc_code = 0
-        self.letzter_ntc_code_kanal_1 = 0
-        self.letzter_ntc_code_kanal_2 = 0
-        self.letztes_pwm_duty = 0.0
-
-    def write_digipot(self, channel, code):
-        """Speichert den Digipot-Code pro Kanal im Mock-Zustand."""
-        if channel not in (1, 2):
-            raise ValueError("channel muss 1 oder 2 sein")
-
-        if code < 0:
-            code = 0
-        elif code > 255:
-            code = 255
-
-        if channel == 1:
-            self.letzter_ntc_code_kanal_1 = code
-        else:
-            self.letzter_ntc_code_kanal_2 = code
-        self.letzter_ntc_code = code
-
-    def _write_code_auf_beide_digipots(self, code):
-        """Schreibt denselben NTC-Code auf beide simulierten Digipot-Kanaele."""
-        self.write_digipot(1, code)
-        self.write_digipot(2, code)
-        self.letzter_ntc_code = code
-
-    def write_ntc_code(self, ntc_code):
-        """Schreibt denselben NTC-Code auf beide simulierten Digipot-Kanaele."""
-        code = max(0, min(255, int(ntc_code)))
-        self._write_code_auf_beide_digipots(code)
-
-    def setze_pwm_duty(self, duty):
-        """Speichert den PWM-Duty im Mock-Zustand."""
-        self.letztes_pwm_duty = duty
 
 
 class _RealBackend:
@@ -152,15 +110,12 @@ class HardwareAbstraktion:
 
     _KONFIG_DATEINAME = "config.json"
 
-    def __init__(self, backend="mock", **konfiguration):
-        """Erzeugt die HardwareAbstraktion mit Mock- oder Real-Backend."""
-        if backend == "mock":
-            self._backend = _MockBackend()
-        elif backend == "real":
-            self._backend = _RealBackend(**konfiguration)
-        else:
-            raise ValueError("backend muss 'mock' oder 'real' sein")
+    def __init__(self, backend="real", **konfiguration):
+        """Erzeugt die HardwareAbstraktion fuer die produktive Laufzeit."""
+        if backend != "real":
+            raise ValueError("backend muss 'real' sein")
 
+        self._backend = _RealBackend(**konfiguration)
         self._backend_name = backend
         self._persistenz_defaults = {
             "letzte_temperatur_c": 0.0,
