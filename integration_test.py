@@ -12,10 +12,15 @@ import argparse
 import sys
 from typing import Any, Dict
 
+if "pytest" in sys.modules:  # pragma: no cover - verhindert Pytest-Sammlung dieses Skripts.
+    import pytest
+
+    pytest.skip("integration_test.py ist ein ausfuehrbares Integrationsskript", allow_module_level=True)
+
 try:
     import requests
-except ImportError as exc:  # pragma: no cover - Laufzeit-Hinweis fuer lokale Umgebung.
-    raise SystemExit("requests ist nicht installiert. Bitte 'pip install requests' ausfuehren.") from exc
+except ImportError:  # pragma: no cover - Laufzeit-Hinweis fuer lokale Umgebung.
+    requests = None
 
 
 DEFAULT_BASIS_URL = "http://192.168.4.1:8080/api/v1"
@@ -128,6 +133,10 @@ def main() -> int:
     """Fuehrt alle Integrationsschritte in fester Reihenfolge aus."""
     args = _parse_args()
     basis_url = args.basis_url.rstrip("/")
+
+    if requests is None:
+        print("TEST FEHLGESCHLAGEN: requests ist nicht installiert. Bitte 'pip install requests' ausfuehren.")
+        return 1
 
     try:
         teste_health(basis_url)
