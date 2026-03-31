@@ -224,8 +224,13 @@ class HardwareAbstraktion:
         try:
             with open(temp_datei, "w", encoding="utf-8") as datei:
                 json.dump(normalisiert, datei)
-            os.replace(temp_datei, self._KONFIG_DATEINAME)
+            try:
+                os.remove(self._KONFIG_DATEINAME)
+            except OSError:
+                pass
+            os.rename(temp_datei, self._KONFIG_DATEINAME)
             self._letzte_gespeicherte_konfiguration = dict(normalisiert)
+            
         except OSError:
             self._persistenz_daten["letzter_status_ok"] = False
             self._persistenz_daten["letzter_status_text"] = "Persistenzfehler"
