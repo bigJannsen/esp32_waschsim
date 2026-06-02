@@ -5,19 +5,19 @@ import os
 
 
 class _RealBackend:
-    """Optionales Hardware-Backend fuer echte Peripherieobjekte."""
+    """Optionales Hardware-Backend fuer echte Peripherieobjekte"""
 
     DIGIPOT_CS_1 = 5
     DIGIPOT_CS_2 = 18
     DIGIPOT_SPI_ID = 1
     DIGIPOT_SPI_BAUDRATE = 1_000_000
-    DIGIPOT_SPI_SCK = 14
-    DIGIPOT_SPI_MOSI = 13
+    DIGIPOT_SPI_SCK = 19
+    DIGIPOT_SPI_MOSI = 23
     DIGIPOT_SPI_MISO = 12
     DIGIPOT_CMD_WRITE_WIPER_0 = 0x00
 
     def __init__(self, **konfiguration):
-        """Initialisiert das reale Backend mit externer Konfiguration."""
+        """Initialisiert das reale Backend mit externer Konfiguration"""
         try:
             machine = __import__("machine")
         except ImportError:
@@ -59,7 +59,7 @@ class _RealBackend:
 
     @staticmethod
     def _clamp_code(code):
-        """Begrenzt den Digipot-Code auf den gueltigen MCP4161-Bereich."""
+        """Begrenzt den Digipot-Code auf den gueltigen MCP4161-Bereich"""
         if code < 0:
             return 0
         if code > 255:
@@ -67,7 +67,7 @@ class _RealBackend:
         return code
 
     def write_digipot(self, channel, code):
-        """Schreibt einen Digipot-Code auf den ausgewaehlten MCP4161-Kanal."""
+        """Schreibt einen Digipot-Code auf den ausgewaehlten MCP4161-Kanal"""
         if channel not in (1, 2):
             raise ValueError("channel muss 1 oder 2 sein")
 
@@ -273,7 +273,7 @@ class HardwareAbstraktion:
             raise ValueError("channel muss 1 oder 2 sein")
         if isinstance(code, bool) or not isinstance(code, int):
             raise ValueError("code muss int sein")
-        if code < 0:
+        if code < 0: # evtl. unter 0°C evaluieren
             code = 0
         elif code > 255:
             code = 255
@@ -305,6 +305,6 @@ class HardwareAbstraktion:
         }
 
     def setze_sicheren_zustand(self):
-        """Setzt die Ausgaenge deterministisch auf einen sicheren Zustand."""
+        """Setzt die Ausgaenge deterministisch auf einen sicheren Zustand"""
         self.setze_ntc_code(0)
         self.setze_pwm_duty(0.0)

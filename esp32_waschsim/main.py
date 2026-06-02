@@ -61,7 +61,7 @@ class SystemAnwendung:
 
             konfiguration = self.ap_wlan.ifconfig()
             ap_ip = konfiguration[0] if isinstance(konfiguration, tuple) else konfiguration[0]
-            print("WLAN AP aktiv auf {}".format(ap_ip))
+            print("WLAN AP aktiv auf {}".format(ap_ip)) # läuft! 
             return ap_ip
         except Exception as exc:
             self.hardware.setze_sicheren_zustand()
@@ -85,5 +85,5 @@ def main():
     asyncio.run(_main_async())
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": # __name__ zu __main__ wechseln -> sonst startet AP nicht automatisch
     main()
