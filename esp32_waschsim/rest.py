@@ -1,3 +1,6 @@
+# rest.py
+# REST-Server: verarbeitet HTTP-Anfragen und gibt validierte Parameter weiter
+
 """REST-Kommunikationsschicht der ESP32-Firmware."""
 
 import json
@@ -232,3 +235,4 @@ class RestServer:
             "\r\n"
         ).format(status_code, grund, len(body)).encode("utf-8")
         return header + body
+ 

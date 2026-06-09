@@ -1,3 +1,6 @@
+# main.py
+# Einstiegspunkt des Systems (Start der Module, WLAN, REST-Server)
+
 """Einstiegspunkt der ESP32-Firmware mit WLAN-AP- und REST-Orchestrierung."""
 
 import network
@@ -87,3 +90,4 @@ def main():
 
 if __name__ == "__main__": # __name__ zu __main__ wechseln -> sonst startet AP nicht automatisch
     main()
+ 

@@ -1,3 +1,9 @@
+# hardware.py
+# Hardware-Abstraktionsschicht für GPIO, PWM und I2C.
+# Alle direkten Hardwarezugriffe (Pins setzen, PWM initialisieren, I2C starten)
+# werden ausschließlich hier umgesetzt. Keine fachliche Logik in diesem Modul.
+
+
 """Hardware-nahe Abstraktionsschicht fuer die produktive Laufzeit."""
 
 import json
@@ -15,6 +21,9 @@ class _RealBackend:
     DIGIPOT_SPI_MOSI = 23
     DIGIPOT_SPI_MISO = 12
     DIGIPOT_CMD_WRITE_WIPER_0 = 0x00
+
+    PWM_PIN = 25
+    PWM_FREQ = 1000
 
     def __init__(self, **konfiguration):
         """Initialisiert das reale Backend mit externer Konfiguration"""
@@ -41,6 +50,7 @@ class _RealBackend:
         self._spi = None
         self._digipot_cs_1 = None
         self._digipot_cs_2 = None
+        self._pwm = None
 
         if self._machine is not None:
             self._spi = machine.SPI(
@@ -56,6 +66,10 @@ class _RealBackend:
             self._digipot_cs_2 = machine.Pin(self.DIGIPOT_CS_2, machine.Pin.OUT)
             self._digipot_cs_1.value(1)
             self._digipot_cs_2.value(1)
+
+            self._pwm = machine.PWM(machine.Pin(self.PWM_PIN))
+            self._pwm.freq(self.PWM_FREQ)
+            self._pwm.duty_u16(0)
 
     @staticmethod
     def _clamp_code(code):
@@ -102,6 +116,11 @@ class _RealBackend:
         """Delegiert den PWM-Duty an die konfigurierte reale Ausgabe."""
         if self._pwm_setzer is not None:
             self._pwm_setzer(duty)
+
+        if self._pwm is not None:
+            duty_u16 = int(duty * 65535)
+            self._pwm.duty_u16(duty_u16)
+
         self.letztes_pwm_duty = duty
 
 
@@ -230,7 +249,7 @@ class HardwareAbstraktion:
                 pass
             os.rename(temp_datei, self._KONFIG_DATEINAME)
             self._letzte_gespeicherte_konfiguration = dict(normalisiert)
-            
+
         except OSError:
             self._persistenz_daten["letzter_status_ok"] = False
             self._persistenz_daten["letzter_status_text"] = "Persistenzfehler"
@@ -273,7 +292,7 @@ class HardwareAbstraktion:
             raise ValueError("channel muss 1 oder 2 sein")
         if isinstance(code, bool) or not isinstance(code, int):
             raise ValueError("code muss int sein")
-        if code < 0: # evtl. unter 0°C evaluieren
+        if code < 0:  # evtl. unter 0°C evaluieren
             code = 0
         elif code > 255:
             code = 255
