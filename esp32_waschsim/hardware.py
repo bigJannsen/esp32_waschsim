@@ -69,7 +69,7 @@ class _RealBackend:
 
             self._pwm = machine.PWM(machine.Pin(self.PWM_PIN))
             self._pwm.freq(self.PWM_FREQ)
-            self._pwm.duty_u16(0)
+            self._setze_pwm_ausgabe(0.0)
 
     @staticmethod
     def _clamp_code(code):
@@ -112,15 +112,29 @@ class _RealBackend:
             self._ntc_code_setzer(code)
         self._write_code_auf_beide_digipots(code)
 
+    def _setze_pwm_ausgabe(self, duty):
+        """Schreibt den Duty-Wert auf die PWM-Ausgabe"""
+        if self._pwm is None:
+            return
+
+        if duty < 0.0:
+            duty = 0.0
+        elif duty > 1.0:
+            duty = 1.0
+
+        duty_u16 = getattr(self._pwm, "duty_u16", None)
+        if callable(duty_u16):
+            duty_u16(int(duty * 65535))
+            return
+
+        self._pwm.duty(int(duty * 1023))
+
     def setze_pwm_duty(self, duty):
-        """Delegiert den PWM-Duty an die konfigurierte reale Ausgabe."""
+        """Delegiert den PWM-Duty an die konfigurierte reale Ausgabe"""
         if self._pwm_setzer is not None:
             self._pwm_setzer(duty)
 
-        if self._pwm is not None:
-            duty_u16 = int(duty * 65535)
-            self._pwm.duty_u16(duty_u16)
-
+        self._setze_pwm_ausgabe(duty)
         self.letztes_pwm_duty = duty
 
 
