@@ -312,6 +312,16 @@ class HardwareAbstraktion:
             code = 255
         self._backend.write_digipot(channel, code)
 
+    def merke_temperaturwert(self, temperatur_c):
+        """Merkt den letzten API-Temperaturwert"""
+        if isinstance(temperatur_c, bool) or not isinstance(temperatur_c, float):
+            raise ValueError("temperatur_c muss float sein")
+
+        self._persistenz_daten["letzte_temperatur_c"] = temperatur_c
+        self._persistenz_daten["letzter_status_ok"] = True
+        self._persistenz_daten["letzter_status_text"] = "OK"
+        self.speichere_konfiguration(self._persistenz_daten)
+
     def setze_pwm_duty(self, duty):
         """Setzt den normierten PWM-Duty-Wert als float."""
         if isinstance(duty, bool) or not isinstance(duty, float):
@@ -321,6 +331,16 @@ class HardwareAbstraktion:
 
         self._backend.setze_pwm_duty(duty)
         self._persistenz_daten["letztes_pwm_duty"] = duty
+        self._persistenz_daten["letzter_status_ok"] = True
+        self._persistenz_daten["letzter_status_text"] = "OK"
+        self.speichere_konfiguration(self._persistenz_daten)
+
+    def merke_druckwert(self, druck_pa):
+        """Merkt den letzten API-Druckwert"""
+        if isinstance(druck_pa, bool) or not isinstance(druck_pa, float):
+            raise ValueError("druck_pa muss float sein")
+
+        self._persistenz_daten["letzter_druck_pa"] = druck_pa
         self._persistenz_daten["letzter_status_ok"] = True
         self._persistenz_daten["letzter_status_text"] = "OK"
         self.speichere_konfiguration(self._persistenz_daten)

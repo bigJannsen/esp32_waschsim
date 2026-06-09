@@ -130,6 +130,9 @@ class RestServer:
                 return self._fehlerantwort(400, "BAD_REQUEST", "temperature_c ausserhalb 0.0 bis 100.0")
 
             ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c)
+            merke_temperaturwert = getattr(self.hardware, "merke_temperaturwert", None)
+            if callable(merke_temperaturwert):
+                merke_temperaturwert(temperatur_c)
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
 
@@ -155,6 +158,9 @@ class RestServer:
                 return self._fehlerantwort(400, "BAD_REQUEST", "pressure_pa ausserhalb 0.0 bis 2452.0")
 
             pwm_duty = self.pressure_sensor.verarbeite_druck_pa(pressure_pa)
+            merke_druckwert = getattr(self.hardware, "merke_druckwert", None)
+            if callable(merke_druckwert):
+                merke_druckwert(pressure_pa)
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
 
