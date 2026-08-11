@@ -1,66 +1,33 @@
 """Unit-Tests fuer NtcSensor mit deterministischer Mock-Hardware."""
 
 import pytest
-
 from mock_hardware import MockHardware
 from sensors import NtcSensor
 
 
-def test_ntc_25_grad_schreibt_auf_beide_digipots():
+@pytest.mark.parametrize("temperatur", [0, 25.0, 100])
+def test_ntc_grenz_und_stuetzwerte_aktualisieren_beide_kanaele(temperatur):
     hardware = MockHardware()
-    sensor = NtcSensor(hardware)
-
-    code = sensor.verarbeite_temperatur(25.0)
-
+    code = NtcSensor(hardware).verarbeite_temperatur(temperatur)
     assert isinstance(code, int)
-    assert hardware.letzter_ntc_code_kanal_1 == code
-    assert hardware.letzter_ntc_code_kanal_2 == code
-    assert hardware.letzter_ntc_code == code
-
-
-def test_ntc_grenzwert_0_grad():
-    hardware = MockHardware()
-    sensor = NtcSensor(hardware)
-
-    code = sensor.verarbeite_temperatur(0.0)
-
-    assert isinstance(code, int)
+    assert hardware.temperature_1_c == float(temperatur)
+    assert hardware.temperature_2_c == float(temperatur)
     assert hardware.letzter_ntc_code_kanal_1 == code
     assert hardware.letzter_ntc_code_kanal_2 == code
 
 
-def test_ntc_grenzwert_100_grad():
-    hardware = MockHardware()
-    sensor = NtcSensor(hardware)
-
-    code = sensor.verarbeite_temperatur(100.0)
-
-    assert isinstance(code, int)
-    assert hardware.letzter_ntc_code_kanal_1 == code
-    assert hardware.letzter_ntc_code_kanal_2 == code
-
-
-def test_ntc_mittelwert_40_grad():
-    hardware = MockHardware()
-    sensor = NtcSensor(hardware)
-
-    code = sensor.verarbeite_temperatur(40.0)
-
-    assert isinstance(code, int)
-    assert hardware.letzter_ntc_code_kanal_1 == code
-    assert hardware.letzter_ntc_code_kanal_2 == code
-
-
-@pytest.mark.parametrize("ungueltig", [True, False])
-def test_ntc_bool_ungueltig(ungueltig):
-    sensor = NtcSensor(MockHardware())
-
+@pytest.mark.parametrize("ungueltig", [True, False, -0.1, 100.1, "25"])
+def test_ntc_ungueltige_werte(ungueltig):
     with pytest.raises(ValueError):
-        sensor.verarbeite_temperatur(ungueltig)
+        NtcSensor(MockHardware()).verarbeite_temperatur(ungueltig)
 
 
-def test_ntc_int_derzeit_ungueltig():
-    sensor = NtcSensor(MockHardware())
-
-    with pytest.raises(ValueError):
-        sensor.verarbeite_temperatur(25)
+def test_ntc_einzelkanal_laesst_anderen_unveraendert():
+    hardware = MockHardware()
+    sensor = NtcSensor(hardware)
+    sensor.verarbeite_temperatur(25, channel=1)
+    code_1 = hardware.letzter_ntc_code_kanal_1
+    sensor.verarbeite_temperatur(60, channel=2)
+    assert hardware.letzter_ntc_code_kanal_1 == code_1
+    assert hardware.temperature_1_c == 25.0
+    assert hardware.temperature_2_c == 60.0

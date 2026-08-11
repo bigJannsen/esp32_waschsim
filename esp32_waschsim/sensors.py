@@ -19,10 +19,10 @@ class SensorBasis:
     @staticmethod
     def _validiere_float_wert(wert, name):
         """float pruefen"""
-        if isinstance(wert, bool) or not isinstance(wert, float):
-            raise ValueError("{} muss float sein".format(name))
+        if isinstance(wert, bool) or not isinstance(wert, (int, float)):
+            raise ValueError("{} muss numerisch sein".format(name))
 
-        return wert
+        return float(wert)
 
     @classmethod
     def _validiere_float_bereich(cls, wert, name, minimum, maximum):
@@ -61,6 +61,8 @@ class NtcSensorBasis(SensorBasis):
     DIGIPOT_CODE_MIN = None
     DIGIPOT_CODE_MAX = None
     DIGIPOT_CODE_INVERTIERT = None
+    TEMPERATUR_MIN_C = None
+    TEMPERATUR_MAX_C = None
 
     def _pruefe_implementierung(self):
         """NTC Kennwerte pruefen"""
@@ -72,6 +74,8 @@ class NtcSensorBasis(SensorBasis):
                 "DIGIPOT_CODE_MIN",
                 "DIGIPOT_CODE_MAX",
                 "DIGIPOT_CODE_INVERTIERT",
+                "TEMPERATUR_MIN_C",
+                "TEMPERATUR_MAX_C",
             ],
         )
         self._pruefe_kennlinie()
@@ -101,9 +105,12 @@ class NtcSensorBasis(SensorBasis):
 
     def verarbeite_temperatur(self, temperatur_c, channel=None):
         """Verarbeitet einen Temperaturwert und setzt optional einen einzelnen NTC-Kanal."""
+        temperatur_c = self._validiere_float_bereich(
+            temperatur_c, "temperatur_c", self.TEMPERATUR_MIN_C, self.TEMPERATUR_MAX_C
+        )
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         ntc_code = self.quantisierung_ohm_zu_code(widerstand_ohm)
-        self.schreibe_ntc_code(ntc_code, channel=channel)
+        self.schreibe_ntc_code(ntc_code, channel=channel, temperatur_c=temperatur_c)
 
         return ntc_code
 
@@ -160,10 +167,12 @@ class NtcSensorBasis(SensorBasis):
 
         return code
 
-    def schreibe_ntc_code(self, ntc_code, channel=None):
+    def schreibe_ntc_code(self, ntc_code, channel=None, temperatur_c=None):
         """NTC Code ausgeben"""
         if self.hardware is not None:
-            if channel is None:
+            if hasattr(self.hardware, "setze_ntc_zustand"):
+                self.hardware.setze_ntc_zustand(channel, temperatur_c, ntc_code)
+            elif channel is None:
                 self.hardware.setze_ntc_code(ntc_code)
             else:
                 self.hardware.write_digipot(channel, ntc_code)
@@ -224,6 +233,8 @@ class NtcSensor(NtcSensorBasis):
     DIGIPOT_CODE_MIN = 0
     DIGIPOT_CODE_MAX = 255
     DIGIPOT_CODE_INVERTIERT = False
+    TEMPERATUR_MIN_C = 0.0
+    TEMPERATUR_MAX_C = 100.0
 
 
 # Drucksensor Logik
@@ -264,7 +275,7 @@ class PressureSensorBasis(SensorBasis):
     def verarbeite_druck_pa(self, druck_pa):
         """Druck in PWM Duty"""
         duty_norm = self.berechne_duty_norm(druck_pa)
-        self.schreibe_pwm_duty(duty_norm)
+        self.schreibe_pwm_duty(duty_norm, druck_pa=float(druck_pa))
 
         return duty_norm
 
@@ -284,10 +295,20 @@ class PressureSensorBasis(SensorBasis):
 
         return self.DUTY_MIN_NORM + anteil * duty_span
 
-    def schreibe_pwm_duty(self, duty_norm):
+    def schreibe_pwm_duty(self, duty_norm, druck_pa=None):
         """PWM Duty ausgeben"""
         if self.hardware is not None:
-            self.hardware.setze_pwm_duty(duty_norm)
+            if hasattr(self.hardware, "setze_druck_zustand"):
+                self.hardware.setze_druck_zustand(druck_pa, duty_norm)
+            else:
+                self.hardware.setze_pwm_duty(duty_norm)
+
+    def berechne_druck_mmws(self, druck_pa):
+        """Rechnet einen gueltigen Druckwert von Pascal in mm Wassersaeule um."""
+        druck_pa = self._validiere_float_bereich(
+            druck_pa, "druck_pa", self.DRUCK_MIN_PA, self.DRUCK_MAX_PA
+        )
+        return druck_pa / 9.81
 
 
 # Drucksensor PWM908

@@ -22,6 +22,10 @@ except ImportError:
     import time
 
 
+DISPLAY_BREITE = 128
+DISPLAY_HOEHE = 64
+
+
 class DisplayHelper:
     """
     Hilfsfunktionen für SSD1306-Texte
@@ -31,7 +35,7 @@ class DisplayHelper:
     """
 
     CHAR_WIDTH = 8
-    DISPLAY_WIDTH = DisplayManager.DISPLAY_BREITE
+    DISPLAY_WIDTH = DISPLAY_BREITE
 
     @classmethod
     def max_chars(cls):
@@ -85,8 +89,8 @@ class DisplayManager:
     STATUS_TIMEOUT = 15
 
     # Displaygröße
-    DISPLAY_BREITE = 128
-    DISPLAY_HOEHE = 64
+    DISPLAY_BREITE = DISPLAY_BREITE
+    DISPLAY_HOEHE = DISPLAY_HOEHE
 
 
     def __init__(self, display):

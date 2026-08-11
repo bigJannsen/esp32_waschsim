@@ -10,6 +10,9 @@ class MockHardware:
         self.letzter_ntc_code_kanal_1 = 0
         self.letzter_ntc_code_kanal_2 = 0
         self.letztes_pwm_duty = 0.0
+        self.temperature_1_c = 0.0
+        self.temperature_2_c = 0.0
+        self.pressure_pa = 0.0
 
     @staticmethod
     def _clamp_code(code):
@@ -58,6 +61,18 @@ class MockHardware:
             raise ValueError("duty muss im Bereich 0.0 bis 1.0 liegen")
         self.letztes_pwm_duty = duty
 
+    def setze_ntc_zustand(self, channel, temperatur_c, code):
+        """Speichert Fachwert und Code gemeinsam pro ausgewaehltem Kanal."""
+        channels = (1, 2) if channel is None else (channel,)
+        for kanal in channels:
+            self.write_digipot(kanal, code)
+            setattr(self, "temperature_{}_c".format(kanal), float(temperatur_c))
+
+    def setze_druck_zustand(self, pressure_pa, duty):
+        """Speichert Druck und daraus berechneten Duty gemeinsam."""
+        self.pressure_pa = float(pressure_pa)
+        self.setze_pwm_duty(float(duty))
+
     def lese_status(self):
         """Liefert den aktuellen Mock-Status fuer Assertions in Tests."""
         return {
@@ -66,4 +81,12 @@ class MockHardware:
             "letzter_ntc_code_kanal_1": self.letzter_ntc_code_kanal_1,
             "letzter_ntc_code_kanal_2": self.letzter_ntc_code_kanal_2,
             "letztes_pwm_duty": self.letztes_pwm_duty,
+            "temperature_1_c": self.temperature_1_c,
+            "temperature_2_c": self.temperature_2_c,
+            "ntc_code_1": self.letzter_ntc_code_kanal_1,
+            "ntc_code_2": self.letzter_ntc_code_kanal_2,
+            "pressure_pa": self.pressure_pa,
+            "pwm_duty": self.letztes_pwm_duty,
+            "letzter_status_ok": True,
+            "letzter_status_text": "OK",
         }

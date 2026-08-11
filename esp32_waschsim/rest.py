@@ -22,23 +22,24 @@ class RestServer:
         self.hardware = hardware
         self.host = host
         self.port = port
+        hardware_status = self.hardware.lese_status()
         self._letzte_werte = {
             "temperature": {
                 "mode": None,
                 "channels": {
                     "1": {
-                        "temperature_c": None,
-                        "ntc_code": None,
+                        "temperature_c": hardware_status.get("temperature_1_c", 0.0),
+                        "ntc_code": hardware_status.get("ntc_code_1", 0),
                     },
                     "2": {
-                        "temperature_c": None,
-                        "ntc_code": None,
+                        "temperature_c": hardware_status.get("temperature_2_c", 0.0),
+                        "ntc_code": hardware_status.get("ntc_code_2", 0),
                     },
                 },
             },
             "pressure": {
-                "pressure_pa": None,
-                "pwm_duty": None,
+                "pressure_pa": hardware_status.get("pressure_pa", 0.0),
+                "pwm_duty": hardware_status.get("pwm_duty", 0.0),
             },
             "last_command": None,
         }
