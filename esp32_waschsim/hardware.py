@@ -176,6 +176,10 @@ class _RealBackend:
 
         return self._heizung_pin.value() == 0
 
+    def hat_heizungseingang(self):
+        """Meldet passiv, ob ein physischer Heizungseingang konfiguriert ist."""
+        return self._heizung_pin is not None
+
     def hole_display(self):
         """Liefert die initialisierte Displayinstanz."""
         return self._display
@@ -411,6 +415,10 @@ class HardwareAbstraktion:
     def ist_heizung_aktiv(self):
         """Gibt den Zustand des Heizungsrelais zurück."""
         return self._backend.ist_heizung_aktiv()
+
+    def hat_heizungseingang(self):
+        """Meldet, ob der optionale Heizungseingang verfuegbar ist."""
+        return self._backend.hat_heizungseingang()
 
     def lese_status(self):
         """Liefert den diagnostischen Hardwarestatus ohne zusaetzliche I/O."""

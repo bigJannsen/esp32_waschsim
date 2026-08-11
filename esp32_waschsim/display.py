@@ -1,39 +1,21 @@
-# display.py
-
-# OLED-Displaymanager für den ESP32
-
-# Dieses Modul enthält ausschließlich die komplette Darstellungslogik des SSD1306-Displays
-
-# Das Display erhält bereits ein initialisiertes SSD1306_I2C-Objekt und besitzt keinerlei Kenntnis
-# über Pins, I2C oder GPIOs
-
-"""
-Verantwortlichkeiten
---------------------
-* Verwaltung aller Displayzustände
-* Automatischer Rücksprung zur Basisanzeige
-* Zeichnen aller Displayseiten
-* Kapselung der SSD1306-Ausgabe
-"""
+"""Zustandsbasierte, rein darstellende OLED-Benutzeroberflaeche."""
 
 try:
-    import utime as time
-except ImportError:
-    import time
+    import time as _time
+except ImportError:  # pragma: no cover
+    _time = None
 
 
 DISPLAY_BREITE = 128
 DISPLAY_HOEHE = 64
+BOOT_TIMEOUT_MS = 5_000
+NTC_UPDATE_TIMEOUT_MS = 10_000
+DRUCK_UPDATE_TIMEOUT_MS = 10_000
+STATUS_TIMEOUT_MS = 15_000
+NETWORK_NOTICE_TIMEOUT_MS = 5_000
 
 
 class DisplayHelper:
-    """
-    Hilfsfunktionen für SSD1306-Texte
-
-    SSD1306.text() verwendet standardmäßig ein 8x8-Pixel-Zeichenraster
-    Bei 128 Pixel Breite passen somit maximal 16 Zeichen pro Zeile
-    """
-
     CHAR_WIDTH = 8
     DISPLAY_WIDTH = DISPLAY_BREITE
 
@@ -43,575 +25,223 @@ class DisplayHelper:
 
     @classmethod
     def fit(cls, text):
-        """
-        Kürzt Text automatisch auf die maximal sichtbare Zeichenanzahl
-        """
-
         return str(text)[: cls.max_chars()]
 
-    @classmethod
-    def split_lines(cls, text, max_lines=2):
-        """
-        Zerlegt langen Text automatisch in mehrere Displayzeilen
-        """
 
-        text = str(text)
+class _SystemTicks:
+    def ticks_ms(self):
+        if hasattr(_time, "ticks_ms"):
+            return _time.ticks_ms()
+        return int(_time.monotonic() * 1000)
 
-        breite = cls.max_chars()
+    def ticks_diff(self, newer, older):
+        if hasattr(_time, "ticks_diff"):
+            return _time.ticks_diff(newer, older)
+        return newer - older
 
-        zeilen = []
-
-        while text and len(zeilen) < max_lines:
-            zeilen.append(text[:breite])
-            text = text[breite:]
-
-        return zeilen
 
 class DisplayManager:
-    """
-    Verwaltung der kompletten OLED-Oberfläche.
-
-    Die Klasse besitzt einen internen Zustandsautomaten. Öffentliche Methoden setzen ausschließlich den Zustand und speichern Anzeigedaten,
-    Das eigentliche Zeichnen erfolgt über private _draw_xxx()-Methoden.
-    """
-
-    # Displayzustände
     BOOT = 0
-    WLAN = 1
+    WLAN_CONNECTING = 1
     ACCESS_POINT = 2
     BASIS = 3
     NTC_UPDATE = 4
     DRUCK_UPDATE = 5
     STATUS = 6
 
-    # Zeitkonstanten
-    UPDATE_TIMEOUT = 10
-    STATUS_TIMEOUT = 15
+    BOOT_TIMEOUT_MS = BOOT_TIMEOUT_MS
+    NTC_UPDATE_TIMEOUT_MS = NTC_UPDATE_TIMEOUT_MS
+    DRUCK_UPDATE_TIMEOUT_MS = DRUCK_UPDATE_TIMEOUT_MS
+    STATUS_TIMEOUT_MS = STATUS_TIMEOUT_MS
 
-    # Displaygröße
-    DISPLAY_BREITE = DISPLAY_BREITE
-    DISPLAY_HOEHE = DISPLAY_HOEHE
-
-
-    def __init__(self, display):
-        """
-        Initialisiert den Displaymanager
-        """
-
+    def __init__(self, display, clock=None):
         if display is None:
             raise ValueError("display darf nicht None sein")
-
         self._display = display
-
+        self._clock = clock or _SystemTicks()
         self._zustand = self.BOOT
-        self._timeout = None
+        self._started_at = self._clock.ticks_ms()
+        self._timeout_ms = BOOT_TIMEOUT_MS
+        self._dirty = True
+        self._next_network_state = None
+        self._temperature_1_c = 0.0
+        self._temperature_2_c = 0.0
+        self._pressure_pa = 0.0
+        self._pressure_mmws = 0.0
+        self._heizung_aktiv = None
+        self._status = {}
+        self.update()
 
-        self._temperatur_1 = 0.0
-        self._temperatur_2 = 0.0
+    def _set_state(self, state, timeout_ms=None):
+        self._zustand = state
+        self._started_at = self._clock.ticks_ms()
+        self._timeout_ms = timeout_ms
+        self._dirty = True
+        self.update()
 
-        self._druck_pa = 0.0
-        self._druck_mmws = 0.0
+    def _expired(self):
+        return self._timeout_ms is not None and self._clock.ticks_diff(
+            self._clock.ticks_ms(), self._started_at
+        ) >= self._timeout_ms
 
-        self._heizung = False
-
-        self._ssid = ""
-        self._ip = ""
-
-        self._status_ok = True
-        self._status_text = "OK"
-
-        self._draw_boot()
-
-
-    # Interne Hilfsmethoden
-    def _zeit(self):
-        """ Liefert die aktuelle Laufzeit in Sekunden """
-        try:
-            return time.time()
-        except AttributeError:
-            return time.ticks_ms() // 1000
-
-    def _starte_timeout(self, sekunden):
-        """
-        Startet einen Rücksprungtimer
-        """
-
-        self._timeout = self._zeit() + sekunden
-
-    def _timeout_abgelaufen(self):
-        """
-        Prüft, ob ein Rücksprung erfolgen muss
-        """
-
-        if self._timeout is None:
-            return False
-
-        return self._zeit() >= self._timeout
-
-    # Zyklische Aktualisierung
     def update(self):
-        """
-        Wird zyklisch aus main.py aufgerufen
-
-        Nach Ablauf eines Timers erfolgt automatisch
-        der Rücksprung zur Basisanzeige
-        """
-
-        if self._zustand == self.BASIS:
-            return
-
-        if not self._timeout_abgelaufen():
-            return
-
-        self.basisanzeige(
-            self._temperatur_1,
-            self._temperatur_2,
-            self._druck_pa,
-            self._druck_mmws,
-            self._heizung,
-        )
-
+        if self._expired():
+            if self._zustand == self.BOOT and self._next_network_state is not None:
+                state = self._next_network_state
+                self._next_network_state = None
+                self._set_state(state, NETWORK_NOTICE_TIMEOUT_MS if state == self.ACCESS_POINT else None)
+                return
+            self._zustand = self.BASIS
+            self._timeout_ms = None
+            self._dirty = True
+        if self._dirty:
+            self._render()
+            self._dirty = False
 
     def bootscreen(self):
-        """Aktiviert den Bootscreen"""
+        self._next_network_state = None
+        self._set_state(self.BOOT, BOOT_TIMEOUT_MS)
 
-        self._zustand = self.BOOT
-        self._draw_boot()
+    def wlan_connecting(self):
+        if self._zustand == self.BOOT and not self._expired():
+            self._next_network_state = self.WLAN_CONNECTING
+            return
+        self._set_state(self.WLAN_CONNECTING)
 
+    def wlan_verbindung(self, ssid=None, ip=None):
+        _ = (ssid, ip)
+        self.wlan_connecting()
 
-    def wlan_verbindung(self, ssid, ip):
-        """
-        Zeigt eine erfolgreiche WLAN-Verbindung an
-        """
+    def access_point(self, ssid=None, ip=None):
+        _ = (ssid, ip)
+        if self._zustand == self.BOOT and not self._expired():
+            self._next_network_state = self.ACCESS_POINT
+            return
+        self._set_state(self.ACCESS_POINT, NETWORK_NOTICE_TIMEOUT_MS)
 
-        self._zustand = self.WLAN
+    def netzwerk_bereit(self, access_point=False):
+        """Merkt das echte Netzwerkergebnis bis zum Ende des Bootscreens vor."""
+        state = self.ACCESS_POINT if access_point else self.BASIS
+        if self._zustand == self.BOOT and not self._expired():
+            self._next_network_state = state
+            return
+        self._set_state(state, NETWORK_NOTICE_TIMEOUT_MS if access_point else None)
 
-        self._ssid = str(ssid)
-        self._ip = str(ip)
+    def basisanzeige(self, temperature_1_c, temperature_2_c, pressure_pa,
+                     pressure_mmws, heizung_aktiv=None):
+        self._set_basiswerte(temperature_1_c, temperature_2_c, pressure_pa,
+                             pressure_mmws, heizung_aktiv)
+        self._set_state(self.BASIS)
 
-        self._starte_timeout(self.UPDATE_TIMEOUT)
+    def _set_basiswerte(self, t1, t2, pa, mmws, heizung):
+        values = (t1, t2, pa, mmws, heizung)
+        old = (self._temperature_1_c, self._temperature_2_c,
+               self._pressure_pa, self._pressure_mmws, self._heizung_aktiv)
+        self._temperature_1_c, self._temperature_2_c = t1, t2
+        self._pressure_pa, self._pressure_mmws = pa, mmws
+        self._heizung_aktiv = heizung
+        if values != old and self._zustand == self.BASIS:
+            self._dirty = True
 
-        self._draw_wlan()
+    def aktualisiere_basiswerte(self, temperature_1_c, temperature_2_c,
+                                pressure_pa, pressure_mmws, heizung_aktiv=None):
+        self._set_basiswerte(temperature_1_c, temperature_2_c, pressure_pa,
+                             pressure_mmws, heizung_aktiv)
 
-    # -------------------------------------------------
-    # Access Point
-    # -------------------------------------------------
-
-    def access_point(self, ssid, ip):
-        """
-        Zeigt den Access-Point-Modus
-        """
-
-        self._zustand = self.ACCESS_POINT
-
-        self._ssid = str(ssid)
-        self._ip = str(ip)
-
-        self._starte_timeout(self.UPDATE_TIMEOUT)
-
-        self._draw_ap()
-
-
-    def basisanzeige(
-        self,
-        temperatur_1,
-        temperatur_2,
-        druck_pa,
-        druck_mmws,
-        heizung,
-    ):
-        """
-        Aktualisiert die permanente Hauptanzeige. Es werden ausschließlich Daten gespeichert.
-        Das Zeichnen erfolgt anschließend über _draw_basis()
-        """
-
-        self._zustand = self.BASIS
-        self._timeout = None
-
-        self._temperatur_1 = float(temperatur_1)
-        self._temperatur_2 = float(temperatur_2)
-
-        self._druck_pa = float(druck_pa)
-        self._druck_mmws = float(druck_mmws)
-
-        self._heizung = bool(heizung)
-
-        self._draw_basis()
-
-   
-    # Temperaturupdate
-
-    def ntc_update(self, kanal, temperatur):
-        """
-        Zeigt eine Aktualisierung eines einzelnen NTC-Kanals an;
-        Nach Ablauf des Timeouts erfolgt automatisch die Rückkehr zur Basisanzeige.
-        """
-
-        self._zustand = self.NTC_UPDATE
-
-        temperatur = float(temperatur)
-
-        if kanal == 1:
-            self._temperatur_1 = temperatur
-        elif kanal == 2:
-            self._temperatur_2 = temperatur
-        else:
-            raise ValueError("kanal muss 1 oder 2 sein")
-
-        self._starte_timeout(self.UPDATE_TIMEOUT)
-
-        self._draw_ntc()
-
-
-    # Temperaturupdate beide Kanäle
+    def ntc_update(self, payload_or_channel, temperatur=None):
+        if isinstance(payload_or_channel, dict):
+            payload = payload_or_channel
+            self._temperature_1_c = payload["temperature_1_c"]
+            self._temperature_2_c = payload["temperature_2_c"]
+        else:  # Kompatibilitaet zur bisherigen Display-API
+            if payload_or_channel == 1:
+                self._temperature_1_c = temperatur
+            elif payload_or_channel == 2:
+                self._temperature_2_c = temperatur
+            else:
+                raise ValueError("kanal muss 1 oder 2 sein")
+        self._set_state(self.NTC_UPDATE, NTC_UPDATE_TIMEOUT_MS)
 
     def ntc_update_gemeinsam(self, temperatur):
-        """
-        Aktualisiert beide Temperaturkanäle gleichzeitig
-        """
-
-        self._zustand = self.NTC_UPDATE
-
-        temperatur = float(temperatur)
-
-        self._temperatur_1 = temperatur
-        self._temperatur_2 = temperatur
-
-        self._starte_timeout(self.UPDATE_TIMEOUT)
-
-        self._draw_ntc()
-
-
-    # Druckupdate
-    def druck_update(self, druck_pa, druck_mmws):
-        """
-        Zeigt Druckänderung.
-        """
-
-        self._zustand = self.DRUCK_UPDATE
-
-        self._druck_pa = float(druck_pa)
-        self._druck_mmws = float(druck_mmws)
-
-        self._starte_timeout(self.UPDATE_TIMEOUT)
-
-        self._draw_druck()
-
-
-
-    def statusanzeige(self, status_ok, status_text):
-        """
-        Zeigt allgemeinen Systemstatus
-        """
-
-        self._zustand = self.STATUS
-
-        self._status_ok = bool(status_ok)
-        self._status_text = str(status_text)
-
-        self._starte_timeout(self.STATUS_TIMEOUT)
-
-        self._draw_status()
-
-# Zeichnungsmethodiken 
-
-    def _draw_boot(self):
-        """Zeichnet Bootscreen"""
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text("Miele", 38, 8)
-        d.text("Sensor Emulator", 12, 24)
-        d.text("ESP32", 42, 40)
-
-        d.show()
-
-    def _draw_wlan(self):
-        """Zeichnet die WLAN-Seite"""
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text("WLAN verbunden", 0, 0)
-        d.text(
-            DisplayHelper.fit(self._ssid),
-            0,
-            18
-        )
-
-        d.text(
-            DisplayHelper.fit(self._ip),
-            0,
-            34
-        )
-
-        d.show()
-
-    def _draw_ap(self):
-        """Zeichnet den Access-Point-Modus"""
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text("Access Point", 0, 0)
-        d.text(
-            DisplayHelper.fit(self._ssid),
-            0,
-            18
-        )
-
-        d.text(
-            DisplayHelper.fit(self._ip),
-            0,
-            34
-        )
-
-        d.show()
-
-    def _draw_basis(self):
-        """Zeichnet die permanente Hauptansicht"""
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text(
-            "T1:{:>5.1f}C".format(self._temperatur_1),
-            0,
-            0,
-        )
-
-        d.text(
-            "T2:{:>5.1f}C".format(self._temperatur_2),
-            0,
-            12,
-        )
-
-        d.text(
-            "P:{:>5.0f}Pa".format(self._druck_pa),
-            0,
-            28,
-        )
-
-        d.text(
-            "{:>5.1f}mm".format(self._druck_mmws),
-            0,
-            40,
-        )
-
-        heizung = (
-            "HEIZUNG EIN"
-            if self._heizung
-            else "HEIZUNG AUS"
-        )
-
-        d.text(heizung, 0, 56)
-
-        d.show()
-
-    def _draw_ntc(self):
-        """
-        Zeichnet die Anzeige während Temperaturupdates
-        """
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text("NTC Update", 20, 0)
-
-        d.text(
-            "T1 {:5.1f}C".format(self._temperatur_1),
-            0,
-            20,
-        )
-
-        d.text(
-            "T2 {:5.1f}C".format(self._temperatur_2),
-            0,
-            36,
-        )
-
-        d.show()
-
-    def _draw_druck(self):
-        """ Zeichnet die Druck-Aktualisierungsseite. """
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text("Druck Update", 16, 0)
-
-        d.text(
-            "{:.0f} Pa".format(self._druck_pa),
-            0,
-            22,
-        )
-
-        d.text(
-            "{:.1f} mmWS".format(self._druck_mmws),
-            0,
-            38,
-        )
-
-        d.show()
-
-    def _draw_status(self):
-        """Zeichnet die Statusanzeige."""
-
-        d = self._display
-
-        d.fill(0)
-
-        d.text("Systemstatus", 10, 0)
-
-        status = "OK" if self._status_ok else "FEHLER"
-
-        d.text(status, 0, 22)
-
-        zeilen = DisplayHelper.split_lines(
-            self._status_text,
-            max_lines=2
-        )
-
-        if len(zeilen) > 0:
-            d.text(
-                zeilen[0],
-                0,
-                36
-            )
-
-        if len(zeilen) > 1:
-            d.text(
-                zeilen[1],
-                0,
-                48
-            )
-
-        d.show()
-
-
-    # Öffentliche Hilfsmethoden
+        self.ntc_update({"temperature_1_c": temperatur, "temperature_2_c": temperatur})
+
+    def druck_update(self, pressure_pa, pressure_mmws=None):
+        if isinstance(pressure_pa, dict):
+            payload = pressure_pa
+            pressure_pa = payload["pressure_pa"]
+            pressure_mmws = payload["pressure_mmws"]
+        self._pressure_pa = pressure_pa
+        self._pressure_mmws = pressure_mmws
+        self._set_state(self.DRUCK_UPDATE, DRUCK_UPDATE_TIMEOUT_MS)
+
+    def statusanzeige(self, status, status_text=None):
+        if isinstance(status, dict):
+            self._status = status
+        else:  # Kompatibilitaet zur bisherigen API
+            self._status = {"ok": bool(status), "message": status_text}
+        self._set_state(self.STATUS, STATUS_TIMEOUT_MS)
 
     def hole_zustand(self):
-        """
-        Liefert den aktuell aktiven Displayzustand.
-        """
-
         return self._zustand
 
     def ist_basisanzeige(self):
-        """
-        Prüft, ob sich das Display aktuell
-        in der Basisanzeige befindet.
-        """
-
         return self._zustand == self.BASIS
 
-    def display_leeren(self):
-        """
-        Löscht das komplette OLED-Display.
-        """
-
-        self._display.fill(0)
-        self._display.show()
-
-    def ausschalten(self):
-        """
-        Schaltet den Displayinhalt aus.
-        """
-
-        self.display_leeren()
-
-    def einschalten(self):
-        """
-        Erzwingt ein erneutes Zeichnen
-        des aktuell gespeicherten Zustands.
-        """
-
-        if self._zustand == self.BOOT:
-            self._draw_boot()
-        elif self._zustand == self.WLAN:
-            self._draw_wlan()
-        elif self._zustand == self.ACCESS_POINT:
-            self._draw_ap()
-        elif self._zustand == self.BASIS:
-            self._draw_basis()
-        elif self._zustand == self.NTC_UPDATE:
-            self._draw_ntc()
-        elif self._zustand == self.DRUCK_UPDATE:
-            self._draw_druck()
-        elif self._zustand == self.STATUS:
-            self._draw_status()
-
-
-    # Diagnosefunktionen
-
-    def hole_statusdaten(self):
-        """
-        Liefert den kompletten internen
-        Anzeigezustand als Dictionary.
-
-        Kann später für REST-Diagnose
-        oder Debugging verwendet werden.
-        """
-
-        return {
-            "zustand": self._zustand,
-            "temperatur_1": self._temperatur_1,
-            "temperatur_2": self._temperatur_2,
-            "druck_pa": self._druck_pa,
-            "druck_mmws": self._druck_mmws,
-            "heizung": self._heizung,
-            "ssid": self._ssid,
-            "ip": self._ip,
-            "status_ok": self._status_ok,
-            "status_text": self._status_text,
-            "timeout": self._timeout,
-        }
-
-    def aktualisieren(self):
-        """
-        Alias für update().
-        """
-
+    def neu_zeichnen(self):
+        self._dirty = True
         self.update()
 
-    def neu_zeichnen(self):
-        """
-        Erzwingt ein komplettes Neuzeichnen
-        der aktuellen Displayseite.
-        """
+    aktualisieren = update
 
-        self.einschalten()
+    def _line(self, text, row):
+        self._display.text(DisplayHelper.fit(text), 0, row * 10)
 
-    def reset(self):
-        """
-        Setzt den kompletten Displaymanager
-        auf den Initialzustand zurück.
-        """
+    def _render(self):
+        self._display.fill(0)
+        if self._zustand == self.BOOT:
+            self._line("Miele & Cie.KG", 0); self._line("ESP-Waschsim", 2); self._line("GTG/RD", 5)
+        elif self._zustand == self.WLAN_CONNECTING:
+            self._title(); self._line("WLAN", 2); self._line("verbindet...", 3)
+        elif self._zustand == self.ACCESS_POINT:
+            self._title(); self._line("Access Point", 2); self._line("aktiv. Bitte", 3); self._line("verbinden!", 4)
+        elif self._zustand == self.BASIS:
+            self._title(); self._line("Heizung: " + self._heat_text(), 1)
+            self._line("T1: {} Grad".format(self._fmt(self._temperature_1_c)), 2)
+            self._line("T2: {} Grad".format(self._fmt(self._temperature_2_c)), 3)
+            self._line("Druck: {} Pa".format(self._fmt(self._pressure_pa)), 4)
+            self._line("{} mmWS".format(self._fmt(self._pressure_mmws)), 5)
+        elif self._zustand == self.NTC_UPDATE:
+            self._title(); self._line("Neue Temperat.:", 2)
+            self._line("NTC1: {} Grad".format(self._fmt(self._temperature_1_c)), 3)
+            self._line("NTC2: {} Grad".format(self._fmt(self._temperature_2_c)), 4)
+        elif self._zustand == self.DRUCK_UPDATE:
+            self._title(); self._line("Neuer Druck:", 2)
+            self._line("{} Pa".format(self._fmt(self._pressure_pa)), 3)
+            self._line("{} mmWS".format(self._fmt(self._pressure_mmws)), 4)
+        else:
+            self._render_status()
+        self._display.show()
 
-        self._zustand = self.BOOT
+    def _title(self):
+        self._line("Miele Waschsim", 0)
 
-        self._timeout = None
+    @staticmethod
+    def _fmt(value):
+        if value is None:
+            return "--"
+        return "{:.1f}".format(value)
 
-        self._temperatur_1 = 0.0
-        self._temperatur_2 = 0.0
+    def _heat_text(self):
+        if self._heizung_aktiv is None:
+            return "--"
+        return "AN" if self._heizung_aktiv else "AUS"
 
-        self._druck_pa = 0.0
-        self._druck_mmws = 0.0
-
-        self._heizung = False
-
-        self._ssid = ""
-        self._ip = ""
-
-        self._status_ok = True
-        self._status_text = "OK"
-
-        self._draw_boot()
+    def _render_status(self):
+        data = self._status
+        hardware = data.get("hardware", data)
+        self._line("Status: " + ("ok" if data.get("ok") else "Fehler"), 0)
+        self._line("T1 {} Grd".format(self._fmt(hardware.get("temperature_1_c"))), 1)
+        self._line("T2 {} Grd".format(self._fmt(hardware.get("temperature_2_c"))), 2)
+        self._line("{} Pa".format(self._fmt(hardware.get("pressure_pa"))), 3)
+        self._line("{} mmWS".format(self._fmt(data.get("pressure_mmws"))), 4)
+        self._line("{} API:{}".format(data.get("backend", "real"), data.get("api_version", "v1")), 5)

@@ -26,6 +26,37 @@ Netzwerkparameter sind nun zentral in `network_manager.py` definiert.
 ## Manueller Smoke-Test auf realer ESP32-Zielhardware
 
 Vor den Tests `NETWORK_MODE = "auto"` nur temporaer auf dem Testgeraet setzen.
+
+## OLED-UI-Smoke-Tests auf realer ESP32-Zielhardware
+
+Der Repository-Default `NETWORK_MODE = "legacy_ap"` bleibt fuer diese Tests unveraendert.
+
+### TEST UI-A – Boot
+1. Startscreen (`Miele & Cie.KG`, `ESP-Waschsim`, `GTG/RD`) pruefen.
+2. Sichtdauer von ungefaehr 5 Sekunden und anschliessend korrekten Netzwerkzustand pruefen.
+
+### TEST UI-B – Legacy-AP
+1. Pruefen, dass der AP weiterhin startet und die AP-Anzeige sichtbar wird.
+2. `GET /api/v1/health` ueber den AP auf Erreichbarkeit pruefen.
+
+### TEST UI-C – Temperatur
+1. Temperatur per PUT fuer same, separate und beide Einzelkanaele setzen.
+2. Korrekte T1-/T2-Werte auf der NTC-Seite und Rueckkehr zur Basis nach 10 Sekunden pruefen.
+
+### TEST UI-D – Druck
+1. Druck per PUT setzen und Pa sowie mmWS auf der Druckseite vergleichen.
+2. Rueckkehr zur Basis nach 10 Sekunden pruefen.
+
+### TEST UI-E – Status
+1. `GET /api/v1/status` abrufen und Statusseite pruefen.
+2. Rueckkehr zur Basis nach 15 Sekunden pruefen.
+
+### TEST UI-F – Optionales Display
+1. OLED abstecken beziehungsweise seine Initialisierung gezielt fehlschlagen lassen.
+2. Pruefen, dass Netzwerk startet und REST einschliesslich `/health` erreichbar bleibt.
+
+Diese Punkte sind ein manueller Plan; in dieser Entwicklungsumgebung wurde keine
+ESP32-Hardwarevalidierung von OLED oder Auto-WLAN durchgefuehrt.
 Der Repository-Default bleibt bis zum vollstaendigen Hardware-Nachweis
 `legacy_ap`.
 
