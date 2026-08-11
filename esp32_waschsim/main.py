@@ -1,7 +1,7 @@
-import network
 import uasyncio as asyncio
 
 from hardware import HardwareAbstraktion
+from network_manager import NETWORK_MODE, NetworkManager
 from rest import RestServer
 from sensors import NtcSensor, PressureSensor
 
@@ -9,10 +9,6 @@ from sensors import NtcSensor, PressureSensor
 class SystemAnwendung:
     """Verbindet Hardware, WLAN und REST-Server in deterministischer Reihenfolge."""
     
-    # wird ersetzt durch neue Netzwerkmethode
-    AP_SSID = "miele"
-    AP_PASSWORT = "10000000"
-
     def __init__(self):
         """Initialisiert alle Schicht-Komponenten fuer den Laufzeitstart"""
         self.hardware = HardwareAbstraktion()
@@ -23,7 +19,7 @@ class SystemAnwendung:
             pressure_sensor=self.druck_sensor,
             hardware=self.hardware,
         )
-        self.ap_wlan = network.WLAN(network.AP_IF)
+        self.network_manager = NetworkManager()
 
     def initialisiere_hardware(self):
         """Initialisiert die Hardware inkl. sicherem Startzustand und Display."""
@@ -31,48 +27,13 @@ class SystemAnwendung:
         self.hardware.setze_sicheren_zustand()
         self.hardware.initialisiere_display()
 
-    def _ermittle_ap_authmode(self):
-
-        # Ersetzen durch Verbindung zu Miele-Netzwerk, dann erst AP
-        """Bestimmt den bestverfuegbaren WPA2-Authmode fuer den AP-Betrieb"""
-        
-        if hasattr(network, "AUTH_WPA2_PSK"):
-            return network.AUTH_WPA2_PSK
-        if hasattr(network, "AUTH_WPA_WPA2_PSK"):
-            return network.AUTH_WPA_WPA2_PSK
-        return None
-
-    async def starte_wlan_ap(self):
-        """Startet den WLAN-Access-Point und liefert die AP-IP an terminal zurück"""
-        try:
-            self.ap_wlan.active(True)
-
-            authmode = self._ermittle_ap_authmode()
-            if authmode is None:
-                self.ap_wlan.config(essid=self.AP_SSID, password=self.AP_PASSWORT)
-            else:
-                self.ap_wlan.config(essid=self.AP_SSID, password=self.AP_PASSWORT, authmode=authmode)
-
-            for _ in range(20):
-                if self.ap_wlan.active():
-                    break
-                await asyncio.sleep_ms(50)
-
-            if not self.ap_wlan.active():
-                raise RuntimeError("AP wurde nicht aktiv")
-
-            konfiguration = self.ap_wlan.ifconfig()
-            ap_ip = konfiguration[0] if isinstance(konfiguration, tuple) else konfiguration[0]
-            print("WLAN AP aktiv auf {}".format(ap_ip)) # läuft! 
-            return ap_ip
-        except Exception as exc:
-            self.hardware.setze_sicheren_zustand()
-            raise Exception("WLAN-AP konnte nicht gestartet werden: {}".format(exc))
-
     async def starte_system(self):
         """Startet nach erfolgreichem WLAN-Setup den REST-Server asynchron"""
-        # öffentlicher Startpunkt in RestServer?
-        await self.starte_wlan_ap()
+        netzwerk_status = await self.network_manager.starte(NETWORK_MODE)
+        if not netzwerk_status.get("ok"):
+            self.hardware.setze_sicheren_zustand()
+            print("Netzwerkstart fehlgeschlagen: {}".format(netzwerk_status))
+            raise RuntimeError("Kein REST-faehiger Netzwerkmodus")
         await self.rest_server._starte_server_async()
 
 
