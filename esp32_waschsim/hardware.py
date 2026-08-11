@@ -8,7 +8,10 @@
 import json
 import os
 
-from ssd1306 import SSD1306_I2C
+try:
+    from ssd1306 import SSD1306_I2C
+except ImportError:
+    SSD1306_I2C = None
 
 
 class _RealBackend:
@@ -25,7 +28,8 @@ class _RealBackend:
     DIGIPOT_CMD_WRITE_WIPER_0 = 0x00
 
     # "Taster"-Eingang für Heizung
-    HEIZUNG_GPIO = 6
+    # Noch kein sicher dokumentierter Anwendungspin vorhanden.
+    HEIZUNG_GPIO = None
 
     # PWM-Pins
     PWM_PIN = 25
@@ -89,13 +93,14 @@ class _RealBackend:
             self._pwm.duty_u16(0)
 
             # Heizungskontakt initialisieren
-            self._heizung_pin = machine.Pin(
-                self.HEIZUNG_GPIO,
-                machine.Pin.IN,
-                machine.Pin.PULL_UP,
-            )
+            if self.HEIZUNG_GPIO is not None:
+                self._heizung_pin = machine.Pin(
+                    self.HEIZUNG_GPIO, machine.Pin.IN, machine.Pin.PULL_UP
+                )
 
             try:
+                if SSD1306_I2C is None:
+                    raise ImportError("ssd1306 nicht verfuegbar")
                 self._display_i2c = machine.I2C(
                     self.DISPLAY_I2C_ID,
                     scl=machine.Pin(self.DISPLAY_SCL),
@@ -189,10 +194,12 @@ class HardwareAbstraktion:
         self._backend = _RealBackend(**konfiguration)
         self._backend_name = backend
         self._persistenz_defaults = {
-            "letzte_temperatur_c": 0.0,
-            "letzter_ntc_code": 0,
-            "letzter_druck_pa": 0.0,
-            "letztes_pwm_duty": 0.0,
+            "temperature_1_c": 0.0,
+            "temperature_2_c": 0.0,
+            "ntc_code_1": 0,
+            "ntc_code_2": 0,
+            "pressure_pa": 0.0,
+            "pwm_duty": 0.0,
             "letzter_status_ok": True,
             "letzter_status_text": "OK",
         }
@@ -222,25 +229,24 @@ class HardwareAbstraktion:
 
         normalisiert = dict(self._persistenz_defaults)
 
-        if "letzte_temperatur_c" in daten:
-            if isinstance(daten["letzte_temperatur_c"], bool):
-                raise ValueError("letzte_temperatur_c darf kein bool sein")
-            normalisiert["letzte_temperatur_c"] = float(daten["letzte_temperatur_c"])
-
-        if "letzter_ntc_code" in daten:
-            if isinstance(daten["letzter_ntc_code"], bool):
-                raise ValueError("letzter_ntc_code darf kein bool sein")
-            normalisiert["letzter_ntc_code"] = int(daten["letzter_ntc_code"])
-
-        if "letzter_druck_pa" in daten:
-            if isinstance(daten["letzter_druck_pa"], bool):
-                raise ValueError("letzter_druck_pa darf kein bool sein")
-            normalisiert["letzter_druck_pa"] = float(daten["letzter_druck_pa"])
-
-        if "letztes_pwm_duty" in daten:
-            if isinstance(daten["letztes_pwm_duty"], bool):
-                raise ValueError("letztes_pwm_duty darf kein bool sein")
-            normalisiert["letztes_pwm_duty"] = float(daten["letztes_pwm_duty"])
+        # Alte Ein-Kanal-Dateien werden kompatibel auf beide Kanaele abgebildet.
+        legacy_temp = daten.get("letzte_temperatur_c")
+        legacy_code = daten.get("letzter_ntc_code")
+        aliases = {
+            "temperature_1_c": legacy_temp,
+            "temperature_2_c": legacy_temp,
+            "ntc_code_1": legacy_code,
+            "ntc_code_2": legacy_code,
+            "pressure_pa": daten.get("letzter_druck_pa"),
+            "pwm_duty": daten.get("letztes_pwm_duty"),
+        }
+        for name, legacy_wert in aliases.items():
+            wert = daten.get(name, legacy_wert)
+            if wert is None:
+                continue
+            if isinstance(wert, bool) or not isinstance(wert, (int, float)):
+                raise ValueError("{} muss numerisch sein".format(name))
+            normalisiert[name] = int(wert) if name.startswith("ntc_code_") else float(wert)
 
         if "letzter_status_ok" in daten:
             if not isinstance(daten["letzter_status_ok"], bool):
@@ -252,10 +258,16 @@ class HardwareAbstraktion:
                 raise ValueError("letzter_status_text muss str sein")
             normalisiert["letzter_status_text"] = daten["letzter_status_text"]
 
-        if normalisiert["letzter_ntc_code"] < 0 or normalisiert["letzter_ntc_code"] > 255:
-            raise ValueError("letzter_ntc_code muss im Bereich 0 bis 255 liegen")
-        if normalisiert["letztes_pwm_duty"] < 0.0 or normalisiert["letztes_pwm_duty"] > 1.0:
-            raise ValueError("letztes_pwm_duty muss im Bereich 0.0 bis 1.0 liegen")
+        for name in ("ntc_code_1", "ntc_code_2"):
+            if normalisiert[name] < 0 or normalisiert[name] > 255:
+                raise ValueError("{} muss im Bereich 0 bis 255 liegen".format(name))
+        for name in ("temperature_1_c", "temperature_2_c"):
+            if normalisiert[name] < 0.0 or normalisiert[name] > 100.0:
+                raise ValueError("{} muss im Bereich 0.0 bis 100.0 liegen".format(name))
+        if normalisiert["pressure_pa"] < 0.0 or normalisiert["pressure_pa"] > 2452.0:
+            raise ValueError("pressure_pa muss im Bereich 0.0 bis 2452.0 liegen")
+        if normalisiert["pwm_duty"] < 0.0 or normalisiert["pwm_duty"] > 1.0:
+            raise ValueError("pwm_duty muss im Bereich 0.0 bis 1.0 liegen")
 
         return normalisiert
 
@@ -321,21 +333,15 @@ class HardwareAbstraktion:
             normalisiert["letzter_status_text"] = "Konfiguration ungueltig"
 
         self._persistenz_daten = dict(normalisiert)
-        self.setze_ntc_code(normalisiert["letzter_ntc_code"])
-        self.setze_pwm_duty(normalisiert["letztes_pwm_duty"])
 
     def setze_ntc_code(self, ntc_code):
-        """Setzt den NTC-Code mit strikt integerbasierter Validierung."""
+        """Schreibt kompatibilitaetshalber einen Code, ohne Fachdaten zu aendern."""
         if isinstance(ntc_code, bool) or not isinstance(ntc_code, int):
             raise ValueError("ntc_code muss int sein")
         if ntc_code < 0 or ntc_code > 255:
             raise ValueError("ntc_code muss im Bereich 0 bis 255 liegen")
 
-        self._backend.write_ntc_code(ntc_code)
-        self._persistenz_daten["letzter_ntc_code"] = ntc_code
-        self._persistenz_daten["letzter_status_ok"] = True
-        self._persistenz_daten["letzter_status_text"] = "OK"
-        self.speichere_konfiguration(self._persistenz_daten)
+        self._write_ntc_hardware(ntc_code)
 
     def write_digipot(self, channel, code):
         """Schreibt den Digipot-Code auf einen MCP4161-Kanal."""
@@ -349,18 +355,58 @@ class HardwareAbstraktion:
             code = 255
         self._backend.write_digipot(channel, code)
 
+    def setze_ntc_zustand(self, channel, temperatur_c, code):
+        """Aktualisiert Hardware und persistierten fachlichen NTC-Zustand atomar."""
+        channels = (1, 2) if channel is None else (channel,)
+        if any(kanal not in (1, 2) for kanal in channels):
+            raise ValueError("channel muss 1 oder 2 sein")
+        if isinstance(temperatur_c, bool) or not isinstance(temperatur_c, (int, float)):
+            raise ValueError("temperatur_c muss numerisch sein")
+        if temperatur_c < 0.0 or temperatur_c > 100.0:
+            raise ValueError("temperatur_c muss im Bereich 0.0 bis 100.0 liegen")
+        if isinstance(code, bool) or not isinstance(code, int) or code < 0 or code > 255:
+            raise ValueError("code muss int im Bereich 0 bis 255 sein")
+        for kanal in channels:
+            self.write_digipot(kanal, code)
+            self._persistenz_daten["temperature_{}_c".format(kanal)] = float(temperatur_c)
+            self._persistenz_daten["ntc_code_{}".format(kanal)] = int(code)
+        self._backend.letzter_ntc_code = int(code)
+        self._markiere_erfolgreich_und_speichere()
+
+    def setze_druck_zustand(self, pressure_pa, duty):
+        """Aktualisiert PWM-Hardware und persistierten fachlichen Druckzustand atomar."""
+        if isinstance(pressure_pa, bool) or not isinstance(pressure_pa, (int, float)):
+            raise ValueError("pressure_pa muss numerisch sein")
+        if pressure_pa < 0.0 or pressure_pa > 2452.0:
+            raise ValueError("pressure_pa muss im Bereich 0.0 bis 2452.0 liegen")
+        if isinstance(duty, bool) or not isinstance(duty, (int, float)):
+            raise ValueError("duty muss numerisch sein")
+        if duty < 0.0 or duty > 1.0:
+            raise ValueError("duty muss im Bereich 0.0 bis 1.0 liegen")
+        self._write_pwm_hardware(duty)
+        self._persistenz_daten["pressure_pa"] = float(pressure_pa)
+        self._persistenz_daten["pwm_duty"] = float(duty)
+        self._markiere_erfolgreich_und_speichere()
+
+    def _markiere_erfolgreich_und_speichere(self):
+        self._persistenz_daten["letzter_status_ok"] = True
+        self._persistenz_daten["letzter_status_text"] = "OK"
+        self.speichere_konfiguration(self._persistenz_daten)
+
+    def _write_ntc_hardware(self, code):
+        self._backend.write_ntc_code(code)
+
+    def _write_pwm_hardware(self, duty):
+        self._backend.setze_pwm_duty(duty)
+
     def setze_pwm_duty(self, duty):
-        """Setzt den normierten PWM-Duty-Wert als float."""
+        """Schreibt kompatibilitaetshalber den Duty, ohne Fachdaten zu aendern."""
         if isinstance(duty, bool) or not isinstance(duty, float):
             raise ValueError("duty muss float sein")
         if duty < 0.0 or duty > 1.0:
             raise ValueError("duty muss im Bereich 0.0 bis 1.0 liegen")
 
-        self._backend.setze_pwm_duty(duty)
-        self._persistenz_daten["letztes_pwm_duty"] = duty
-        self._persistenz_daten["letzter_status_ok"] = True
-        self._persistenz_daten["letzter_status_text"] = "OK"
-        self.speichere_konfiguration(self._persistenz_daten)
+        self._write_pwm_hardware(duty)
 
     def ist_heizung_aktiv(self):
         """Gibt den Zustand des Heizungsrelais zurück."""
@@ -371,10 +417,12 @@ class HardwareAbstraktion:
         return {
             "backend": self._backend_name,
             "heizung_aktiv": self.ist_heizung_aktiv(),
-            "letzter_ntc_code": self._backend.letzter_ntc_code,
-            "letztes_pwm_duty": self._backend.letztes_pwm_duty,
-            "letzte_temperatur_c": self._persistenz_daten["letzte_temperatur_c"],
-            "letzter_druck_pa": self._persistenz_daten["letzter_druck_pa"],
+            "temperature_1_c": self._persistenz_daten["temperature_1_c"],
+            "temperature_2_c": self._persistenz_daten["temperature_2_c"],
+            "ntc_code_1": self._persistenz_daten["ntc_code_1"],
+            "ntc_code_2": self._persistenz_daten["ntc_code_2"],
+            "pressure_pa": self._persistenz_daten["pressure_pa"],
+            "pwm_duty": self._persistenz_daten["pwm_duty"],
             "letzter_status_ok": self._persistenz_daten["letzter_status_ok"],
             "letzter_status_text": self._persistenz_daten["letzter_status_text"],
         }
@@ -385,6 +433,5 @@ class HardwareAbstraktion:
 
     def setze_sicheren_zustand(self):
         """Setzt die Ausgaenge deterministisch auf einen sicheren Zustand."""
-        self.setze_ntc_code(0)
-        self.setze_pwm_duty(0.0)
- 
+        self._write_ntc_hardware(0)
+        self._write_pwm_hardware(0.0)
