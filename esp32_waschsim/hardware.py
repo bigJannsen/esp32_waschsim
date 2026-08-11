@@ -28,8 +28,7 @@ class _RealBackend:
     DIGIPOT_CMD_WRITE_WIPER_0 = 0x00
 
     # "Taster"-Eingang für Heizung
-    # Noch kein sicher dokumentierter Anwendungspin vorhanden.
-    HEIZUNG_GPIO = None
+    HEIZUNG_GPIO = 32 # Pin32 -> Relais -> GND
 
     # PWM-Pins
     PWM_PIN = 25
