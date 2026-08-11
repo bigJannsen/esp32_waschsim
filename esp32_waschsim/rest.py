@@ -15,13 +15,15 @@ class RestServer:
     TEMPERATUR_MIN_C = 0.0
     TEMPERATUR_MAX_C = 100.0
 
-    def __init__(self, ntc_sensor, pressure_sensor, hardware, host="0.0.0.0", port=8080):
+    def __init__(self, ntc_sensor, pressure_sensor, hardware, host="0.0.0.0", port=8080,
+                 event_callback=None):
         """Initialisiert den REST-Server mit allen benoetigten Abhaengigkeiten."""
         self.ntc_sensor = ntc_sensor
         self.pressure_sensor = pressure_sensor
         self.hardware = hardware
         self.host = host
         self.port = port
+        self.event_callback = event_callback
         hardware_status = self.hardware.lese_status()
         self._letzte_werte = {
             "temperature": {
@@ -43,6 +45,26 @@ class RestServer:
             },
             "last_command": None,
         }
+
+    def _melde_event(self, event_type, payload):
+        """Meldet optionale UI-Ereignisse, ohne REST-Erfolge zu gefaehrden."""
+        if self.event_callback is None:
+            return
+        try:
+            self.event_callback(event_type, payload)
+        except Exception as exc:
+            print("Optionaler Event-Callback fehlgeschlagen: {}".format(exc))
+
+    def _temperatur_event(self, mode, channel=None):
+        channels = self._letzte_werte["temperature"]["channels"]
+        payload = {
+            "temperature_1_c": channels["1"]["temperature_c"],
+            "temperature_2_c": channels["2"]["temperature_c"],
+            "mode": mode,
+        }
+        if channel is not None:
+            payload["channel"] = channel
+        self._melde_event("temperature_updated", payload)
 
     def starte_server(self):
         """Startet den HTTP-Server mit einer nicht-blockierenden Ereignisschleife."""
@@ -165,6 +187,8 @@ class RestServer:
 
                     self._letzte_werte["last_command"] = "set_temperature_same"
 
+                    self._temperatur_event("same")
+
                     return self._ok_antwort(
                         {
                             "ok": True,
@@ -209,6 +233,8 @@ class RestServer:
 
                 self._letzte_werte["last_command"] = "set_temperature_separate"
 
+                self._temperatur_event("separate")
+
                 return self._ok_antwort(
                     {
                         "ok": True,
@@ -246,6 +272,8 @@ class RestServer:
                 }
                 self._letzte_werte["last_command"] = "set_temperature_single"
 
+                self._temperatur_event("single", channel)
+
                 return self._ok_antwort(
                     {
                         "ok": True,
@@ -279,6 +307,12 @@ class RestServer:
         }
         self._letzte_werte["last_command"] = "set_pressure"
 
+        pressure_mmws = self.pressure_sensor.berechne_druck_mmws(pressure_pa)
+        self._melde_event("pressure_updated", {
+            "pressure_pa": pressure_pa,
+            "pressure_mmws": pressure_mmws,
+        })
+
         return self._ok_antwort(
             {
                 "ok": True,
@@ -299,6 +333,12 @@ class RestServer:
             "hardware": hardware_status,
             "last_values": dict(self._letzte_werte),
         }
+
+        status["pressure_mmws"] = self.pressure_sensor.berechne_druck_mmws(
+            hardware_status.get("pressure_pa", 0.0)
+        )
+        status["backend"] = hardware_status.get("backend", "real")
+        self._melde_event("status_requested", status)
 
         return self._ok_antwort(status)
 
