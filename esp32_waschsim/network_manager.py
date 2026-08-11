@@ -11,11 +11,11 @@ except ImportError:  # pragma: no cover - auf CPython nur als Laufzeit-Fallback.
     import asyncio as _asyncio
 
 
-# Zentraler, bewusst konservativer Entwicklungsstand. Keine Produktionsdaten.
-NETWORK_MODE = "legacy_ap"
-STA_SSID = ""
-STA_PASSWORT = ""
-AP_SSID = "miele"
+# Zentraler, bewusst konservativer Entwicklungsstand
+NETWORK_MODE = "legacy_ap"  # "auto" -> WLAN-Connection
+STA_SSID = ""               # SSID für WLAN
+STA_PASSWORT = ""           # Passwort für WLAN
+AP_SSID = "miele"           # AP-Teil nicht ändern wenn WLAN aktiv!
 AP_PASSWORT = "10000000"
 WLAN_TIMEOUT_S = 20
 WLAN_POLL_MS = 100
