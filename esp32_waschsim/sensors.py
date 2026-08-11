@@ -1,4 +1,4 @@
-"""Sensorlogik und Kennwertverarbeitung"""
+"""Fachliche Sensorlogik mit direkter Hardwareansteuerung."""
 
 
 # Allg. Sensorbasis
@@ -99,16 +99,16 @@ class NtcSensorBasis(SensorBasis):
 
             letzter_temperaturwert = temperatur_c
 
-    def verarbeite_temperatur(self, temperatur_c):
-        """Temperatur in Digipot Code"""
+    def verarbeite_temperatur(self, temperatur_c, channel=None):
+        """Verarbeitet einen Temperaturwert und setzt optional einen einzelnen NTC-Kanal."""
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         ntc_code = self.quantisierung_ohm_zu_code(widerstand_ohm)
-        self.schreibe_ntc_code(ntc_code)
+        self.schreibe_ntc_code(ntc_code, channel=channel)
 
         return ntc_code
 
     def berechne_widerstand_ohm(self, temperatur_c):
-        """Temperatur in Widerstand"""
+        """Berechnet den NTC-Widerstand per linearer Interpolation."""
         temperatur_c = self._validiere_float_wert(temperatur_c, "temperatur_c")
         kennlinie = self.KENNLINIE_NTC
 
@@ -160,10 +160,13 @@ class NtcSensorBasis(SensorBasis):
 
         return code
 
-    def schreibe_ntc_code(self, ntc_code):
+    def schreibe_ntc_code(self, ntc_code, channel=None):
         """NTC Code ausgeben"""
         if self.hardware is not None:
-            self.hardware.setze_ntc_code(ntc_code)
+            if channel is None:
+                self.hardware.setze_ntc_code(ntc_code)
+            else:
+                self.hardware.write_digipot(channel, ntc_code)
 
     def _begrenze_digipot_code(self, code):
         """Digipot Code begrenzen"""

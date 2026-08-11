@@ -1,6 +1,3 @@
-# rest.py
-# REST-Server: verarbeitet HTTP-Anfragen und gibt validierte Parameter weiter
-
 """REST-Kommunikationsschicht der ESP32-Firmware."""
 
 import json
@@ -26,11 +23,24 @@ class RestServer:
         self.host = host
         self.port = port
         self._letzte_werte = {
-            "channel": None,
-            "temperature_c": None,
-            "ntc_code": None,
-            "pressure_pa": None,
-            "pwm_duty": None,
+            "temperature": {
+                "mode": None,
+                "channels": {
+                    "1": {
+                        "temperature_c": None,
+                        "ntc_code": None,
+                    },
+                    "2": {
+                        "temperature_c": None,
+                        "ntc_code": None,
+                    },
+                },
+            },
+            "pressure": {
+                "pressure_pa": None,
+                "pwm_duty": None,
+            },
+            "last_command": None,
         }
 
     def starte_server(self):
@@ -84,6 +94,7 @@ class RestServer:
                 return self._route_setze_druck(body_raw)
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
+
         if methode == "GET" and pfad == self.API_BASIS + "/status":
             return self._route_status()
         if methode == "GET" and pfad == self.API_BASIS + "/health":
@@ -121,65 +132,173 @@ class RestServer:
         """Verarbeitet PUT /sensors/temperature inklusive Validierung und Mapping."""
         try:
             daten = self._parse_json_body(body_raw)
-            channel = self._hole_int_feld(daten, "channel")
-            if channel not in (1, 2):
-                return self._fehlerantwort(400, "BAD_REQUEST", "channel muss 1 oder 2 sein")
 
-            temperatur_c = self._hole_float_feld(daten, "temperature_c")
-            if temperatur_c < self.TEMPERATUR_MIN_C or temperatur_c > self.TEMPERATUR_MAX_C:
-                return self._fehlerantwort(400, "BAD_REQUEST", "temperature_c ausserhalb 0.0 bis 100.0")
+            mode = daten.get("mode", None)
+            if mode is not None:
+                if not isinstance(mode, str):
+                    return self._fehlerantwort(400, "BAD_REQUEST", "mode muss ein String sein")
 
-            ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c)
-            merke_temperaturwert = getattr(self.hardware, "merke_temperaturwert", None)
-            if callable(merke_temperaturwert):
-                merke_temperaturwert(temperatur_c)
+                mode = mode.lower()
+                if mode not in ("same", "separate"):
+                    return self._fehlerantwort(400, "BAD_REQUEST", "mode muss 'same' oder 'separate' sein")
+
+                if mode == "same":
+                    temperatur_c = self._hole_float_feld(daten, "temperature_c")
+                    self._pruefe_temperaturbereich(temperatur_c, "temperature_c")
+
+                    ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c)
+
+                    self._letzte_werte["temperature"] = {
+                        "mode": "same",
+                        "channels": {
+                            "1": {
+                                "temperature_c": temperatur_c,
+                                "ntc_code": ntc_code,
+                            },
+                            "2": {
+                                "temperature_c": temperatur_c,
+                                "ntc_code": ntc_code,
+                            },
+                        },
+                    }
+
+                    self._letzte_werte["last_command"] = "set_temperature_same"
+
+                    return self._ok_antwort(
+                        {
+                            "ok": True,
+                            "type": "temperature",
+                            "mode": "same",
+                            "results": [
+                                {
+                                    "channel": 1,
+                                    "temperature_c": temperatur_c,
+                                    "ntc_code": ntc_code,
+                                },
+                                {
+                                    "channel": 2,
+                                    "temperature_c": temperatur_c,
+                                    "ntc_code": ntc_code,
+                                },
+                            ],
+                        }
+                    )
+
+                temperatur_1_c = self._hole_float_feld(daten, "temperature_1_c")
+                temperatur_2_c = self._hole_float_feld(daten, "temperature_2_c")
+                self._pruefe_temperaturbereich(temperatur_1_c, "temperature_1_c")
+                self._pruefe_temperaturbereich(temperatur_2_c, "temperature_2_c")
+
+                ntc_code_1 = self.ntc_sensor.verarbeite_temperatur(temperatur_1_c, channel=1)
+                ntc_code_2 = self.ntc_sensor.verarbeite_temperatur(temperatur_2_c, channel=2)
+
+                self._letzte_werte["temperature"] = {
+                    "mode": "separate",
+                    "channels": {
+                        "1": {
+                            "temperature_c": temperatur_1_c,
+                            "ntc_code": ntc_code_1,
+                        },
+                        "2": {
+                            "temperature_c": temperatur_2_c,
+                            "ntc_code": ntc_code_2,
+                        },
+                    },
+                }
+
+                self._letzte_werte["last_command"] = "set_temperature_separate"
+
+                return self._ok_antwort(
+                    {
+                        "ok": True,
+                        "type": "temperature",
+                        "mode": "separate",
+                        "results": [
+                            {
+                                "channel": 1,
+                                "temperature_c": temperatur_1_c,
+                                "ntc_code": ntc_code_1,
+                            },
+                            {
+                                "channel": 2,
+                                "temperature_c": temperatur_2_c,
+                                "ntc_code": ntc_code_2,
+                            },
+                        ],
+                    }
+                )
+
+            if "channel" in daten:
+                channel = self._hole_int_feld(daten, "channel")
+                if channel not in (1, 2):
+                    return self._fehlerantwort(400, "BAD_REQUEST", "channel muss 1 oder 2 sein")
+
+                temperatur_c = self._hole_float_feld(daten, "temperature_c")
+                self._pruefe_temperaturbereich(temperatur_c, "temperature_c")
+
+                ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c, channel=channel)
+
+                self._letzte_werte["temperature"]["mode"] = "single"
+                self._letzte_werte["temperature"]["channels"][str(channel)] = {
+                    "temperature_c": temperatur_c,
+                    "ntc_code": ntc_code,
+                }
+                self._letzte_werte["last_command"] = "set_temperature_single"
+
+                return self._ok_antwort(
+                    {
+                        "ok": True,
+                        "type": "temperature",
+                        "channel": channel,
+                        "temperature_c": temperatur_c,
+                        "ntc_code": ntc_code,
+                    }
+                )
+
+            return self._fehlerantwort(400, "BAD_REQUEST", "mode oder channel fehlt")
+
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
-
-        self._letzte_werte["channel"] = channel
-        self._letzte_werte["temperature_c"] = temperatur_c
-        self._letzte_werte["ntc_code"] = ntc_code
-
-        return self._ok_antwort(
-            {
-                "ok": True,
-                "channel": channel,
-                "temperature_c": temperatur_c,
-                "ntc_code": ntc_code,
-            }
-        )
 
     def _route_setze_druck(self, body_raw):
         """Verarbeitet PUT /sensors/pressure inklusive Validierung und Mapping."""
         try:
             daten = self._parse_json_body(body_raw)
             pressure_pa = self._hole_float_feld(daten, "pressure_pa")
-            if pressure_pa < 0.0 or pressure_pa > 2452.0:
-                return self._fehlerantwort(400, "BAD_REQUEST", "pressure_pa ausserhalb 0.0 bis 2452.0")
+            self._pruefe_druckbereich(pressure_pa, "pressure_pa")
 
             pwm_duty = self.pressure_sensor.verarbeite_druck_pa(pressure_pa)
-            merke_druckwert = getattr(self.hardware, "merke_druckwert", None)
-            if callable(merke_druckwert):
-                merke_druckwert(pressure_pa)
+
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
 
-        self._letzte_werte["pressure_pa"] = pressure_pa
-        self._letzte_werte["pwm_duty"] = pwm_duty
+        self._letzte_werte["pressure"] = {
+            "pressure_pa": pressure_pa,
+            "pwm_duty": pwm_duty,
+        }
+        self._letzte_werte["last_command"] = "set_pressure"
 
         return self._ok_antwort(
             {
                 "ok": True,
+                "type": "pressure",
                 "pressure_pa": pressure_pa,
                 "pwm_duty": pwm_duty,
             }
         )
 
     def _route_status(self):
-        """Liefert den Hardwarestatus inklusive zuletzt gesetzter API-Werte."""
-        status = self.hardware.lese_status()
-        status.update(self._letzte_werte)
-        status["ok"] = True
+        """Liefert den Hardwarestatus sauber geschachtelt zurueck."""
+        hardware_status = self.hardware.lese_status()
+
+        status = {
+            "ok": bool(hardware_status.get("letzter_status_ok", False)),
+            "service": "esp32_waschsim",
+            "api_version": "v1",
+            "hardware": hardware_status,
+            "last_values": dict(self._letzte_werte),
+        }
+
         return self._ok_antwort(status)
 
     def _route_health(self):
@@ -212,9 +331,19 @@ class RestServer:
         if feldname not in daten:
             raise ValueError("{} fehlt".format(feldname))
         wert = daten[feldname]
-        if isinstance(wert, bool) or not isinstance(wert, float):
+        if isinstance(wert, bool) or not isinstance(wert, (int, float)):
             raise ValueError("{} muss float sein".format(feldname))
-        return wert
+        return float(wert)
+
+    def _pruefe_temperaturbereich(self, temperatur_c, feldname):
+        """Prueft den Temperaturbereich."""
+        if temperatur_c < self.TEMPERATUR_MIN_C or temperatur_c > self.TEMPERATUR_MAX_C:
+            raise ValueError("{} ausserhalb 0.0 bis 100.0".format(feldname))
+
+    def _pruefe_druckbereich(self, pressure_pa, feldname):
+        """Prueft den Druckbereich."""
+        if pressure_pa < 0.0 or pressure_pa > 2452.0:
+            raise ValueError("{} ausserhalb 0.0 bis 2452.0".format(feldname))
 
     def _ok_antwort(self, payload):
         """Erzeugt eine erfolgreiche JSON-Antwort mit Statuscode 200."""
@@ -241,4 +370,3 @@ class RestServer:
             "\r\n"
         ).format(status_code, grund, len(body)).encode("utf-8")
         return header + body
- 

@@ -1,8 +1,3 @@
-# main.py
-# Einstiegspunkt des Systems (Start der Module, WLAN, REST-Server)
-
-"""Einstiegspunkt der ESP32-Firmware mit WLAN-AP- und REST-Orchestrierung."""
-
 import network
 import uasyncio as asyncio
 
@@ -12,13 +7,14 @@ from sensors import NtcSensor, PressureSensor
 
 
 class SystemAnwendung:
-    """Verdrahtet Hardware, WLAN und REST-Server in deterministischer Reihenfolge."""
-
+    """Verbindet Hardware, WLAN und REST-Server in deterministischer Reihenfolge."""
+    
+    # wird ersetzt durch neue Netzwerkmethode
     AP_SSID = "miele"
     AP_PASSWORT = "10000000"
 
     def __init__(self):
-        """Initialisiert alle Schicht-Komponenten fuer den Laufzeitstart."""
+        """Initialisiert alle Schicht-Komponenten fuer den Laufzeitstart"""
         self.hardware = HardwareAbstraktion()
         self.ntc_sensor = NtcSensor(hardware=self.hardware)
         self.druck_sensor = PressureSensor(hardware=self.hardware)
@@ -36,7 +32,10 @@ class SystemAnwendung:
         self.hardware.initialisiere_display()
 
     def _ermittle_ap_authmode(self):
-        """Bestimmt den bestverfuegbaren WPA2-Authmode fuer den AP-Betrieb."""
+
+        # Ersetzen durch Verbindung zu Miele-Netzwerk, dann erst AP
+        """Bestimmt den bestverfuegbaren WPA2-Authmode fuer den AP-Betrieb"""
+        
         if hasattr(network, "AUTH_WPA2_PSK"):
             return network.AUTH_WPA2_PSK
         if hasattr(network, "AUTH_WPA_WPA2_PSK"):
@@ -44,7 +43,7 @@ class SystemAnwendung:
         return None
 
     async def starte_wlan_ap(self):
-        """Startet den WLAN-Access-Point und liefert die AP-IP zurueck."""
+        """Startet den WLAN-Access-Point und liefert die AP-IP an terminal zurück"""
         try:
             self.ap_wlan.active(True)
 
@@ -71,13 +70,14 @@ class SystemAnwendung:
             raise Exception("WLAN-AP konnte nicht gestartet werden: {}".format(exc))
 
     async def starte_system(self):
-        """Startet nach erfolgreichem WLAN-Setup den REST-Server asynchron."""
+        """Startet nach erfolgreichem WLAN-Setup den REST-Server asynchron"""
+        # öffentlicher Startpunkt in RestServer?
         await self.starte_wlan_ap()
         await self.rest_server._starte_server_async()
 
 
 async def _main_async():
-    """Fuehrt den kompletten Systemstart in der Ereignisschleife aus."""
+    """Führt den kompletten Systemstart in der Ereignisschleife aus"""
     anwendung = SystemAnwendung()
     anwendung.initialisiere_hardware()
     await anwendung.starte_system()
@@ -88,6 +88,5 @@ def main():
     asyncio.run(_main_async())
 
 
-if __name__ == "__main__": # __name__ zu __main__ wechseln -> sonst startet AP nicht automatisch
+if __name__ == "__main__": # nach Vgl.operator "__main__" -> sonst startet AP nicht 
     main()
- 
