@@ -27,8 +27,9 @@ class _RealBackend:
     DIGIPOT_SPI_MISO = 12  # Data von Digipoti, nicht benötigt
     DIGIPOT_CMD_WRITE_WIPER_0 = 0x00
 
-    # "Taster"-Eingang für Heizung
-    HEIZUNG_GPIO = 32 # Pin32 -> Relais -> GND
+    # Potentialfreie Relaiskontakte, jeweils active-low gegen GND
+    HEIZUNG_GPIO = 27
+    FRIWA_GPIO = 26
 
     # PWM-Pins
     PWM_PIN = 25
@@ -69,6 +70,7 @@ class _RealBackend:
         self._digipot_cs_2 = None
         self._pwm = None
         self._heizung_pin = None
+        self._friwa_pin = None
         self._display_i2c = None
         self._display = None
 
@@ -91,11 +93,12 @@ class _RealBackend:
             self._pwm.freq(self.PWM_FREQ)
             self._pwm.duty_u16(0)
 
-            # Heizungskontakt initialisieren
-            if self.HEIZUNG_GPIO is not None:
-                self._heizung_pin = machine.Pin(
-                    self.HEIZUNG_GPIO, machine.Pin.IN, machine.Pin.PULL_UP
-                )
+            self._heizung_pin = self._initialisiere_active_low_eingang(
+                self.HEIZUNG_GPIO
+            )
+            self._friwa_pin = self._initialisiere_active_low_eingang(
+                self.FRIWA_GPIO
+            )
 
             try:
                 if SSD1306_I2C is None:
@@ -124,6 +127,25 @@ class _RealBackend:
         if code > 255:
             return 255
         return code
+
+    def _initialisiere_active_low_eingang(self, gpio):
+        """Initialisiert einen optionalen Relaiskontakt robust mit Pull-up."""
+        if self._machine is None or gpio is None:
+            return None
+        try:
+            return self._machine.Pin(
+                gpio, self._machine.Pin.IN, self._machine.Pin.PULL_UP
+            )
+        except Exception:
+            # Optionale Eingänge dürfen den Firmwarestart nicht verhindern.
+            return None
+
+    @staticmethod
+    def _ist_active_low_aktiv(pin):
+        """Liest einen optionalen active-low Eingang ohne Zustandskopie."""
+        if pin is None:
+            return False
+        return pin.value() == 0
 
     def write_digipot(self, channel, code):
         """Schreibt einen Digipot-Code auf den ausgewaehlten MCP4161-Kanal."""
@@ -170,14 +192,19 @@ class _RealBackend:
 
     def ist_heizung_aktiv(self):
         """Liest den Heizungskontakt ein."""
-        if self._heizung_pin is None:
-            return False
-
-        return self._heizung_pin.value() == 0
+        return self._ist_active_low_aktiv(self._heizung_pin)
 
     def hat_heizungseingang(self):
         """Meldet passiv, ob ein physischer Heizungseingang konfiguriert ist."""
         return self._heizung_pin is not None
+
+    def ist_friwa_aktiv(self):
+        """Liest den FriWa-Ventilkontakt active-low ein."""
+        return self._ist_active_low_aktiv(self._friwa_pin)
+
+    def hat_friwa_eingang(self):
+        """Meldet passiv, ob ein physischer FriWa-Eingang verfuegbar ist."""
+        return self._friwa_pin is not None
 
     def hole_display(self):
         """Liefert die initialisierte Displayinstanz."""
@@ -419,11 +446,20 @@ class HardwareAbstraktion:
         """Meldet, ob der optionale Heizungseingang verfuegbar ist."""
         return self._backend.hat_heizungseingang()
 
+    def ist_friwa_aktiv(self):
+        """Gibt den aktuellen Zustand des FriWa-Ventilkontakts zurueck."""
+        return self._backend.ist_friwa_aktiv()
+
+    def hat_friwa_eingang(self):
+        """Meldet, ob der optionale FriWa-Eingang verfuegbar ist."""
+        return self._backend.hat_friwa_eingang()
+
     def lese_status(self):
         """Liefert den diagnostischen Hardwarestatus ohne zusaetzliche I/O."""
         return {
             "backend": self._backend_name,
             "heizung_aktiv": self.ist_heizung_aktiv(),
+            "friwa_aktiv": self.ist_friwa_aktiv(),
             "temperature_1_c": self._persistenz_daten["temperature_1_c"],
             "temperature_2_c": self._persistenz_daten["temperature_2_c"],
             "ntc_code_1": self._persistenz_daten["ntc_code_1"],

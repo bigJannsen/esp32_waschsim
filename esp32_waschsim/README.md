@@ -14,13 +14,13 @@ Emuliert werden aktuell:
 
 - zwei NTC-Temperaturfühler
 - ein elektronischer Drucksensor
-- Heizungsstatus als digitaler Eingang
+- Heizungsstatus und FriWa-Ventilstatus als digitale Eingänge
 
 Die Ansteuerung erfolgt über:
 
 - 2 × MCP4161-503 Digitalpotentiometer für die NTC-Emulation
 - PWM-Ausgang für die Drucksensor-Emulation
-- GPIO-Eingang zur Erkennung des Heizungsrelais
+- GPIO-Eingänge zur Erkennung von Heizungs- und FriWa-Relais
 - SSD1306 OLED zur lokalen Statusanzeige
 - WLAN und REST-API zur externen Vorgabe der Sensorwerte
 
@@ -210,6 +210,8 @@ mmWS = Pa / 9,81
 | DigiPoti SPI MOSI / Data | GPIO23 |
 | DigiPoti SPI MISO | GPIO12 |
 | Drucksensor PWM | GPIO25 |
+| FriWa-Ventil Eingang | GPIO26 |
+| Heizungseingang | GPIO27 |
 
 Die bestehende Sensorverdrahtung bleibt gegenüber dem bisherigen Hardwarestand unverändert.
 
@@ -258,7 +260,7 @@ Der Zustand der Maschinenheizung soll über einen potentialfreien Relaiskontakt 
 Vorgesehene Verdrahtung:
 
 ```text
-GPIO32
+GPIO27
   │
   └──── potentialfreier Relaiskontakt ──── GND
 ```
@@ -280,13 +282,13 @@ Kontakt geschlossen
 Der vorgesehene Eingang ist:
 
 ```text
-GPIO32
+GPIO27
 ```
 
 Vor dem Hardwaretest muss in `hardware.py` entsprechend gesetzt werden:
 
 ```python
-HEIZUNG_GPIO = 32
+HEIZUNG_GPIO = 27
 ```
 
 Im aktuellen Entwicklungsstand kann der Heizungseingang auch deaktiviert betrieben werden:
@@ -296,6 +298,16 @@ HEIZUNG_GPIO = None
 ```
 
 > Wichtig: Der GPIO darf ausschließlich über einen potentialfreien bzw. galvanisch getrennten Kontakt geschaltet werden. Netzspannung oder andere Fremdspannungen dürfen niemals direkt mit dem ESP32 verbunden werden.
+
+## FriWa-Ventilerkennung
+
+Der potentialfreie Relaiskontakt des FriWa-Ventils wird an `GPIO26` angeschlossen:
+
+```text
+GPIO26 -> potentialfreier Relaiskontakt -> GND
+```
+
+Auch dieser Eingang verwendet den internen Pull-up und arbeitet active-low: HIGH bedeutet FriWa AUS, LOW bedeutet FriWa AN. Der aktuelle Zustand steht in der Hardware-Abstraktion über `ist_friwa_aktiv()` und im REST-Hardwarestatus als `"friwa_aktiv"` zur Verfügung. Auf der Basisanzeige kennzeichnet ein `I` hinter dem Heizungsstatus ein aktives FriWa-Ventil.
 
 ---
 
@@ -745,15 +757,16 @@ Empfohlene Reihenfolge:
 2. OLED prüfen
 3. Legacy-Access-Point prüfen
 4. `/api/v1/health` prüfen
-5. GPIO32 manuell gegen GND brücken und Heizungsanzeige prüfen
-6. REST-Temperaturbefehle testen
-7. REST-Druckbefehle testen
-8. PWM-Ausgang mit Oszilloskop prüfen
-9. NTC-Widerstände messen
-10. potentialfreien Heizungsrelaiskontakt anschließen
-11. Sensorleitungen mit der Maschinensteuerung verbinden
-12. kontrollierten Trockenlauf durchführen
-13. anschließend Auto-WLAN auf echter Hardware testen
+5. GPIO27 manuell gegen GND brücken und Heizungsanzeige prüfen
+6. GPIO26 manuell gegen GND brücken und FriWa-Anzeige prüfen
+7. REST-Temperaturbefehle testen
+8. REST-Druckbefehle testen
+9. PWM-Ausgang mit Oszilloskop prüfen
+10. NTC-Widerstände messen
+11. potentialfreien Heizungsrelaiskontakt anschließen
+12. Sensorleitungen mit der Maschinensteuerung verbinden
+13. kontrollierten Trockenlauf durchführen
+14. anschließend Auto-WLAN auf echter Hardware testen
 
 ---
 
@@ -810,7 +823,8 @@ Der Fallback sollte zusätzlich über mehrere ESP32-Neustarts überprüft werden
 | STA-Modus | ✅ implementiert |
 | AP-Fallback | ✅ Mock-getestet |
 | Auto-WLAN auf Zielhardware | 🧪 noch zu validieren |
-| Heizungseingang GPIO32 | 🧪 Hardwaretest ausstehend |
+| Heizungseingang GPIO27 | 🧪 Hardwaretest ausstehend |
+| FriWa-Eingang GPIO26 | 🧪 Hardwaretest ausstehend |
 | Gesamter Trockenlauf an Waschmaschine | 🧪 ausstehend |
 
 ---
@@ -819,7 +833,8 @@ Der Fallback sollte zusätzlich über mehrere ESP32-Neustarts überprüft werden
 
 Für die nächsten Entwicklungs- und Testschritte stehen insbesondere noch an:
 
-- Heizungseingang GPIO32 auf Hardware validieren
+- Heizungseingang GPIO27 auf Hardware validieren
+- FriWa-Eingang GPIO26 auf Hardware validieren
 - OLED auf realer Hardware vollständig prüfen
 - STA-WLAN auf ESP32 testen
 - realen AP-Fallback prüfen

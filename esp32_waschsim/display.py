@@ -69,6 +69,7 @@ class DisplayManager:
         self._pressure_pa = 0.0
         self._pressure_mmws = 0.0
         self._heizung_aktiv = None
+        self._friwa_aktiv = None
         self._status = {}
         self.update()
 
@@ -128,25 +129,28 @@ class DisplayManager:
         self._set_state(state, NETWORK_NOTICE_TIMEOUT_MS if access_point else None)
 
     def basisanzeige(self, temperature_1_c, temperature_2_c, pressure_pa,
-                     pressure_mmws, heizung_aktiv=None):
+                     pressure_mmws, heizung_aktiv=None, friwa_aktiv=None):
         self._set_basiswerte(temperature_1_c, temperature_2_c, pressure_pa,
-                             pressure_mmws, heizung_aktiv)
+                             pressure_mmws, heizung_aktiv, friwa_aktiv)
         self._set_state(self.BASIS)
 
-    def _set_basiswerte(self, t1, t2, pa, mmws, heizung):
-        values = (t1, t2, pa, mmws, heizung)
+    def _set_basiswerte(self, t1, t2, pa, mmws, heizung, friwa):
+        values = (t1, t2, pa, mmws, heizung, friwa)
         old = (self._temperature_1_c, self._temperature_2_c,
-               self._pressure_pa, self._pressure_mmws, self._heizung_aktiv)
+               self._pressure_pa, self._pressure_mmws, self._heizung_aktiv,
+               self._friwa_aktiv)
         self._temperature_1_c, self._temperature_2_c = t1, t2
         self._pressure_pa, self._pressure_mmws = pa, mmws
         self._heizung_aktiv = heizung
+        self._friwa_aktiv = friwa
         if values != old and self._zustand == self.BASIS:
             self._dirty = True
 
     def aktualisiere_basiswerte(self, temperature_1_c, temperature_2_c,
-                                pressure_pa, pressure_mmws, heizung_aktiv=None):
+                                pressure_pa, pressure_mmws, heizung_aktiv=None,
+                                friwa_aktiv=None):
         self._set_basiswerte(temperature_1_c, temperature_2_c, pressure_pa,
-                             pressure_mmws, heizung_aktiv)
+                             pressure_mmws, heizung_aktiv, friwa_aktiv)
 
     def ntc_update(self, payload_or_channel, temperatur=None):
         if isinstance(payload_or_channel, dict):
@@ -205,7 +209,7 @@ class DisplayManager:
         elif self._zustand == self.ACCESS_POINT:
             self._title(); self._line("Access Point", 2); self._line("aktiv. Bitte", 3); self._line("verbinden!", 4)
         elif self._zustand == self.BASIS:
-            self._title(); self._line("Heizung: " + self._heat_text(), 1)
+            self._title(); self._line(self._statuszeile(), 1)
             self._line("T1: {} Grad".format(self._fmt(self._temperature_1_c)), 2)
             self._line("T2: {} Grad".format(self._fmt(self._temperature_2_c)), 3)
             self._line("Druck: {} Pa".format(self._fmt(self._pressure_pa)), 4)
@@ -235,6 +239,11 @@ class DisplayManager:
         if self._heizung_aktiv is None:
             return "--"
         return "AN" if self._heizung_aktiv else "AUS"
+
+    def _statuszeile(self):
+        """Formatiert Heizung und kompakte FriWa-Anzeige auf maximal 16 Zeichen."""
+        friwa_marker = " I" if self._friwa_aktiv else ""
+        return "Heizung: " + self._heat_text() + friwa_marker
 
     def _render_status(self):
         data = self._status
