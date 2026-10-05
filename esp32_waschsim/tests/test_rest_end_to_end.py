@@ -32,6 +32,7 @@ def test_health_und_initialer_status():
     assert send(server, "GET", "/api/v1/health")[0] == 200
     code, status = send(server, "GET", "/api/v1/status")
     assert code == 200 and status["ok"] is True
+    assert status["hardware"]["friwa_aktiv"] is False
     assert status["last_values"]["temperature"]["channels"]["1"]["temperature_c"] == 0.0
 
 

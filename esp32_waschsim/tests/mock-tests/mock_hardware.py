@@ -77,6 +77,8 @@ class MockHardware:
         """Liefert den aktuellen Mock-Status fuer Assertions in Tests."""
         return {
             "backend": "mock",
+            "heizung_aktiv": False,
+            "friwa_aktiv": False,
             "letzter_ntc_code": self.letzter_ntc_code,
             "letzter_ntc_code_kanal_1": self.letzter_ntc_code_kanal_1,
             "letzter_ntc_code_kanal_2": self.letzter_ntc_code_kanal_2,

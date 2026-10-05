@@ -58,7 +58,10 @@ class SystemAnwendung:
         status = self.hardware.lese_status()
         heizung = None
         if self.hardware.hat_heizungseingang():
-            heizung = self.hardware.ist_heizung_aktiv()
+            heizung = status.get("heizung_aktiv", False)
+        friwa = None
+        if self.hardware.hat_friwa_eingang():
+            friwa = status.get("friwa_aktiv", False)
         pressure_pa = status.get("pressure_pa", 0.0)
         self.display_manager.aktualisiere_basiswerte(
             status.get("temperature_1_c", 0.0),
@@ -66,6 +69,7 @@ class SystemAnwendung:
             pressure_pa,
             self.druck_sensor.berechne_druck_mmws(pressure_pa),
             heizung,
+            friwa,
         )
         self.display_manager.update()
 

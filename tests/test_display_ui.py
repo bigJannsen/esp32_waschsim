@@ -52,6 +52,37 @@ def test_basis_enthaelt_alle_fertigen_werte(ui):
         assert expected in text
 
 
+@pytest.mark.parametrize("heizung,text", [
+    (False, "Heizung: AUS I"),
+    (True, "Heizung: AN I"),
+])
+def test_friwa_marker_bei_beiden_heizungszustaenden(ui, heizung, text):
+    manager, display, _ = ui
+    manager.basisanzeige(25.0, 60.0, 0.0, 0.0, heizung, True)
+    assert text in display.content()
+
+
+@pytest.mark.parametrize("heizung,text", [
+    (False, "Heizung: AUS"),
+    (True, "Heizung: AN"),
+])
+def test_inaktive_friwa_hat_keinen_marker(ui, heizung, text):
+    manager, display, _ = ui
+    manager.basisanzeige(25.0, 60.0, 0.0, 0.0, heizung, False)
+    assert text in display.content()
+    assert text + " I" not in display.content()
+
+
+def test_friwa_aenderung_zeichnet_basisanzeige_neu(ui):
+    manager, display, _ = ui
+    manager.basisanzeige(25.0, 60.0, 0.0, 0.0, False, False)
+    frames = len(display.frames)
+    manager.aktualisiere_basiswerte(25.0, 60.0, 0.0, 0.0, False, True)
+    manager.update()
+    assert len(display.frames) == frames + 1
+    assert "Heizung: AUS I" in display.content()
+
+
 @pytest.mark.parametrize("payload", [
     {"mode": "same", "temperature_1_c": 25.0, "temperature_2_c": 25.0},
     {"mode": "separate", "temperature_1_c": 25.0, "temperature_2_c": 60.0},
