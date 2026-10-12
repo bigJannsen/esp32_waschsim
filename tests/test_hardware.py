@@ -55,33 +55,53 @@ def test_relaiseingaenge_nutzen_korrekte_pins_und_pullup(monkeypatch, tmp_path):
     hardware = _hardware_mit_fake_machine(monkeypatch, tmp_path)
     assert _RealBackend.HEIZUNG_GPIO == 27
     assert _RealBackend.FRIWA_GPIO == 26
+    assert _RealBackend.ABWASSERPUMPE_GPIO == 33
     assert _FakePin.initialisierungen.count((27, _FakePin.IN, _FakePin.PULL_UP)) == 1
     assert _FakePin.initialisierungen.count((26, _FakePin.IN, _FakePin.PULL_UP)) == 1
+    assert _FakePin.initialisierungen.count((33, _FakePin.IN, _FakePin.PULL_UP)) == 1
     assert hardware.hat_heizungseingang() is True
     assert hardware.hat_friwa_eingang() is True
+    assert hardware.hat_abwasserpumpeneingang() is True
 
 
 def test_relaiseingaenge_sind_active_low_und_im_status(monkeypatch, tmp_path):
     hardware = _hardware_mit_fake_machine(monkeypatch, tmp_path)
-    _FakePin.werte.update({27: 1, 26: 1})
+    zeit_ms = [0]
+    monkeypatch.setattr("hardware.ticks_ms", lambda: zeit_ms[0])
+    _FakePin.werte.update({27: 1, 26: 1, 33: 1})
+    for zeit_ms[0] in range(0, 201, 20):
+        hardware.aktualisiere_digitale_eingaenge()
     assert hardware.ist_heizung_aktiv() is False
     assert hardware.ist_friwa_aktiv() is False
+    assert hardware.ist_abwasserpumpe_aktiv() is False
 
-    _FakePin.werte.update({27: 0, 26: 0})
+    _FakePin.werte.update({27: 0, 26: 0, 33: 0})
+    for zeit_ms[0] in range(220, 421, 20):
+        hardware.aktualisiere_digitale_eingaenge()
     assert hardware.ist_heizung_aktiv() is True
     assert hardware.ist_friwa_aktiv() is True
+    assert hardware.ist_abwasserpumpe_aktiv() is True
     status = hardware.lese_status()
     assert status["heizung_aktiv"] is True
     assert status["friwa_aktiv"] is True
+    assert status["abwasserpumpe_aktiv"] is True
+    assert status["eingangs_fehler"] == {}
 
 
-def test_relaiseingaenge_ohne_machine_sind_neutral(tmp_path, monkeypatch):
+def test_relaiseingaenge_ohne_machine_sind_unbekannt(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(sys.modules, "machine", None)
     hardware = HardwareAbstraktion()
-    assert hardware.ist_heizung_aktiv() is False
-    assert hardware.ist_friwa_aktiv() is False
+    hardware.aktualisiere_digitale_eingaenge()
+    assert hardware.ist_heizung_aktiv() is None
+    assert hardware.ist_friwa_aktiv() is None
+    assert hardware.ist_abwasserpumpe_aktiv() is None
     assert hardware.hat_heizungseingang() is False
     assert hardware.hat_friwa_eingang() is False
+    assert hardware.hat_abwasserpumpeneingang() is False
+    assert set(hardware.lese_status()["eingangs_fehler"]) == {
+        "heizung", "friwa", "abwasserpumpe",
+    }
 
 
 def test_persistenz_getrennt_und_safe_state_unveraendert(tmp_path, monkeypatch):

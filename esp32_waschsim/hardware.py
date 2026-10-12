@@ -9,9 +9,53 @@ import json
 import os
 
 try:
+    from time import ticks_ms, ticks_diff
+except ImportError:  # CPython-Fallback fuer lokale Tests.
+    from time import monotonic
+
+    def ticks_ms():
+        return int(monotonic() * 1000)
+
+    def ticks_diff(neuer, aelter):
+        return neuer - aelter
+
+
+try:
     from ssd1306 import SSD1306_I2C
 except ImportError:
     SSD1306_I2C = None
+
+
+EINGANG_ENTPRELLZEIT_MS = 200
+EINGANG_ABTASTINTERVALL_MS = 20
+
+
+class EingangsEntprellung:
+    """Bestaetigt beide Flanken nach 200 ms ohne beobachteten Rohsignalwechsel.
+
+    Zwischen Abtastungen ist keine lueckenlose Stabilitaet nachweisbar.
+    Eine Task-Verzoegerung allein setzt das Zeitfenster nicht zurueck.
+    """
+
+    def __init__(self):
+        self.zuruecksetzen()
+
+    def zuruecksetzen(self):
+        """Verwirft bei einem Lesefehler auch den bisher bestaetigten Zustand."""
+        self.zustand = None
+        self._kandidat = None
+        self._kandidat_seit_ms = None
+
+    def aktualisiere(self, rohzustand, zeit_ms):
+        """Liefert bool nach Stabilisierung, davor None (unbekannt)."""
+        if not isinstance(rohzustand, bool):
+            raise ValueError("rohzustand muss bool sein")
+        if rohzustand != self._kandidat:
+            self._kandidat = rohzustand
+            self._kandidat_seit_ms = zeit_ms
+        elif ticks_diff(zeit_ms, self._kandidat_seit_ms) >= EINGANG_ENTPRELLZEIT_MS:
+            self.zustand = rohzustand
+        return self.zustand
 
 
 class _RealBackend:
@@ -30,6 +74,7 @@ class _RealBackend:
     # Potentialfreie Relaiskontakte, jeweils active-low gegen GND
     HEIZUNG_GPIO = 27
     FRIWA_GPIO = 26
+    ABWASSERPUMPE_GPIO = 33
 
     # PWM-Pins
     PWM_PIN = 25
@@ -69,8 +114,19 @@ class _RealBackend:
         self._digipot_cs_1 = None
         self._digipot_cs_2 = None
         self._pwm = None
-        self._heizung_pin = None
-        self._friwa_pin = None
+        self._eingangs_fehler = {}
+        self._eingangs_entprellung = {
+            name: EingangsEntprellung()
+            for name in ("heizung", "friwa", "abwasserpumpe")
+        }
+        self._eingangs_pins = {
+            name: self._initialisiere_active_low_eingang(name, gpio)
+            for name, gpio in (
+                ("heizung", self.HEIZUNG_GPIO),
+                ("friwa", self.FRIWA_GPIO),
+                ("abwasserpumpe", self.ABWASSERPUMPE_GPIO),
+            )
+        }
         self._display_i2c = None
         self._display = None
 
@@ -92,13 +148,6 @@ class _RealBackend:
             self._pwm = machine.PWM(machine.Pin(self.PWM_PIN))
             self._pwm.freq(self.PWM_FREQ)
             self._pwm.duty_u16(0)
-
-            self._heizung_pin = self._initialisiere_active_low_eingang(
-                self.HEIZUNG_GPIO
-            )
-            self._friwa_pin = self._initialisiere_active_low_eingang(
-                self.FRIWA_GPIO
-            )
 
             try:
                 if SSD1306_I2C is None:
@@ -128,24 +177,42 @@ class _RealBackend:
             return 255
         return code
 
-    def _initialisiere_active_low_eingang(self, gpio):
-        """Initialisiert einen optionalen Relaiskontakt robust mit Pull-up."""
-        if self._machine is None or gpio is None:
+    def _initialisiere_active_low_eingang(self, name, gpio):
+        """Initialisiert einen Relaiskontakt; Fehler bleiben diagnostizierbar."""
+        if self._machine is None:
+            self._eingangs_fehler[name] = "machine nicht verfuegbar"
+            return None
+        if gpio is None:
+            self._eingangs_fehler[name] = "Eingang nicht konfiguriert"
             return None
         try:
             return self._machine.Pin(
                 gpio, self._machine.Pin.IN, self._machine.Pin.PULL_UP
             )
-        except Exception:
-            # Optionale Eingänge dürfen den Firmwarestart nicht verhindern.
+        except Exception as exc:
+            self._eingangs_fehler[name] = "Initialisierung fehlgeschlagen: {}".format(exc)
             return None
 
-    @staticmethod
-    def _ist_active_low_aktiv(pin):
-        """Liest einen optionalen active-low Eingang ohne Zustandskopie."""
-        if pin is None:
-            return False
-        return pin.value() == 0
+    def aktualisiere_digitale_eingaenge(self):
+        """Tastet alle Kontakte einmal ab; keine Sleeps oder Flash-Schreibzugriffe."""
+        for name, pin in self._eingangs_pins.items():
+            if pin is None:
+                continue
+            entprellung = self._eingangs_entprellung[name]
+            try:
+                wert = pin.value()
+                if wert not in (0, 1):
+                    raise ValueError("Pin lieferte keinen digitalen Pegel")
+                entprellung.aktualisiere(wert == 0, ticks_ms())
+            except Exception as exc:
+                entprellung.zuruecksetzen()
+                self._eingangs_fehler[name] = "Einlesen fehlgeschlagen: {}".format(exc)
+            else:
+                self._eingangs_fehler.pop(name, None)
+
+    def lese_eingangs_fehler(self):
+        """Liefert eine Kopie der Diagnosen, ohne die Pins erneut einzulesen."""
+        return dict(self._eingangs_fehler)
 
     def write_digipot(self, channel, code):
         """Schreibt einen Digipot-Code auf den ausgewaehlten MCP4161-Kanal."""
@@ -191,20 +258,28 @@ class _RealBackend:
         self.letztes_pwm_duty = duty
 
     def ist_heizung_aktiv(self):
-        """Liest den Heizungskontakt ein."""
-        return self._ist_active_low_aktiv(self._heizung_pin)
+        """Liefert den entprellten Heizungskontakt oder None bei unbekanntem Zustand."""
+        return self._eingangs_entprellung["heizung"].zustand
 
     def hat_heizungseingang(self):
         """Meldet passiv, ob ein physischer Heizungseingang konfiguriert ist."""
-        return self._heizung_pin is not None
+        return self._eingangs_pins["heizung"] is not None
 
     def ist_friwa_aktiv(self):
-        """Liest den FriWa-Ventilkontakt active-low ein."""
-        return self._ist_active_low_aktiv(self._friwa_pin)
+        """Liefert den entprellten FriWa-Kontakt oder None bei unbekanntem Zustand."""
+        return self._eingangs_entprellung["friwa"].zustand
 
     def hat_friwa_eingang(self):
         """Meldet passiv, ob ein physischer FriWa-Eingang verfuegbar ist."""
-        return self._friwa_pin is not None
+        return self._eingangs_pins["friwa"] is not None
+
+    def ist_abwasserpumpe_aktiv(self):
+        """Meldet die elektrische Pumpenansteuerung, keinen Wasserfluss."""
+        return self._eingangs_entprellung["abwasserpumpe"].zustand
+
+    def hat_abwasserpumpeneingang(self):
+        """Meldet, ob der physische Pumpeneingang initialisiert wurde."""
+        return self._eingangs_pins["abwasserpumpe"] is not None
 
     def hole_display(self):
         """Liefert die initialisierte Displayinstanz."""
@@ -439,7 +514,7 @@ class HardwareAbstraktion:
         self._write_pwm_hardware(duty)
 
     def ist_heizung_aktiv(self):
-        """Gibt den Zustand des Heizungsrelais zurück."""
+        """Gibt den entprellten Heizungszustand zurueck (None = unbekannt)."""
         return self._backend.ist_heizung_aktiv()
 
     def hat_heizungseingang(self):
@@ -447,12 +522,24 @@ class HardwareAbstraktion:
         return self._backend.hat_heizungseingang()
 
     def ist_friwa_aktiv(self):
-        """Gibt den aktuellen Zustand des FriWa-Ventilkontakts zurueck."""
+        """Gibt den entprellten FriWa-Zustand zurueck (None = unbekannt)."""
         return self._backend.ist_friwa_aktiv()
 
     def hat_friwa_eingang(self):
         """Meldet, ob der optionale FriWa-Eingang verfuegbar ist."""
         return self._backend.hat_friwa_eingang()
+
+    def aktualisiere_digitale_eingaenge(self):
+        """Wird von der Abtasttask unabhaengig von OLED und REST aufgerufen."""
+        self._backend.aktualisiere_digitale_eingaenge()
+
+    def ist_abwasserpumpe_aktiv(self):
+        """Gibt den entprellten Pumpenzustand zurueck (None = unbekannt)."""
+        return self._backend.ist_abwasserpumpe_aktiv()
+
+    def hat_abwasserpumpeneingang(self):
+        """Meldet, ob der physische Pumpeneingang verfuegbar ist."""
+        return self._backend.hat_abwasserpumpeneingang()
 
     def lese_status(self):
         """Liefert den diagnostischen Hardwarestatus ohne zusaetzliche I/O."""
@@ -460,6 +547,8 @@ class HardwareAbstraktion:
             "backend": self._backend_name,
             "heizung_aktiv": self.ist_heizung_aktiv(),
             "friwa_aktiv": self.ist_friwa_aktiv(),
+            "abwasserpumpe_aktiv": self.ist_abwasserpumpe_aktiv(),
+            "eingangs_fehler": self._backend.lese_eingangs_fehler(),
             "temperature_1_c": self._persistenz_daten["temperature_1_c"],
             "temperature_2_c": self._persistenz_daten["temperature_2_c"],
             "ntc_code_1": self._persistenz_daten["ntc_code_1"],

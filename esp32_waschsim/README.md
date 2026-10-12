@@ -212,6 +212,7 @@ mmWS = Pa / 9,81
 | Drucksensor PWM | GPIO25 |
 | FriWa-Ventil Eingang | GPIO26 |
 | Heizungseingang | GPIO27 |
+| Abwasserpumpen-Eingang | GPIO33 |
 
 Die bestehende Sensorverdrahtung bleibt gegenüber dem bisherigen Hardwarestand unverändert.
 
@@ -308,6 +309,67 @@ GPIO26 -> potentialfreier Relaiskontakt -> GND
 ```
 
 Auch dieser Eingang verwendet den internen Pull-up und arbeitet active-low: HIGH bedeutet FriWa AUS, LOW bedeutet FriWa AN. Der aktuelle Zustand steht in der Hardware-Abstraktion über `ist_friwa_aktiv()` und im REST-Hardwarestatus als `"friwa_aktiv"` zur Verfügung. Auf der Basisanzeige kennzeichnet ein `I` hinter dem Heizungsstatus ein aktives FriWa-Ventil.
+
+## Abwasserpumpenerkennung und gemeinsame Entprellung
+
+Der potentialfreie Relaiskontakt der Abwasserpumpe wird an `GPIO33`
+angeschlossen: `GPIO33 -> potentialfreier Kontakt -> GND`. Auch dieser Eingang
+verwendet `Pin.IN`, `Pin.PULL_UP` und Active-Low. Der Pumpenstatus zeigt die
+elektrische Ansteuerung an; er ist kein Nachweis eines tatsächlichen Wasserflusses.
+Auf der ESP32-Seite sind ausschließlich potentialfreie Kontakte zulässig.
+230 V dürfen nur an der dafür ausgelegten, galvanisch getrennten Relaisspulen-Seite
+anliegen.
+
+Alle drei Eingänge verwenden dieselbe `EingangsEntprellung` in `hardware.py`:
+
+- `EINGANG_ENTPRELLZEIT_MS = 200` gilt für EIN und AUS.
+- Eine separate asynchrone Task ruft `aktualisiere_digitale_eingaenge()` etwa
+  alle `EINGANG_ABTASTINTERVALL_MS = 20` ms auf, auch ohne OLED und während
+  des WLAN-Starts. Der bisherige Display-Systemtask bleibt bei 200 ms.
+- Jeder beobachtete Rohzustandswechsel startet das eigene Stabilitätsfenster
+  neu. Die Zeitmessung verwendet `ticks_ms()` und überlaufsicheres `ticks_diff()`.
+- Eine verzögerte Abtastung allein startet das Stabilitätsfenster nicht neu.
+  Wird erneut derselbe Rohzustand gelesen und sind seit seiner ersten
+  Beobachtung mindestens 200 ms vergangen, wird er übernommen. Es gibt keine
+  zusätzliche zeitliche Grenze für Abtastlücken. Ein bereits bestätigter Zustand
+  bleibt bis zur nächsten Bestätigung erhalten; nach einem Lesefehler wird er
+  sofort unbekannt.
+- Die Statusabfrage liest zwischengespeicherte Zustände und beeinflusst die
+  Entprellzeit nicht. Digitale Eingänge werden nicht persistent gespeichert.
+
+`ist_heizung_aktiv()`, `ist_friwa_aktiv()` und `ist_abwasserpumpe_aktiv()`
+liefern bestätigte Bool-Werte. Beim Start bis zur ersten Stabilisierung sowie
+bei fehlendem oder fehlerhaftem Eingang liefern sie `None`, kein gültiges AUS.
+Nach einem Lesefehler muss das Signal erneut 200 ms beobachtet werden.
+`hat_heizungseingang()`, `hat_friwa_eingang()` und
+`hat_abwasserpumpeneingang()` melden die erfolgreiche Pininitialisierung.
+
+`GET /api/v1/status` übernimmt diese Werte automatisch in `hardware`:
+
+```json
+{
+  "heizung_aktiv": false,
+  "friwa_aktiv": false,
+  "abwasserpumpe_aktiv": true,
+  "eingangs_fehler": {}
+}
+```
+
+Unbekannte Zustände werden als JSON `null` ausgegeben. Initialisierungs- und
+Lesefehler stehen mit Eingangsnamen und Diagnose in `eingangs_fehler`.
+Clients müssen diese Felder auswerten; das bestehende `ok` allein ist kein
+Nachweis gültiger digitaler Eingangszustände. Eine erfolgreiche neue Lesung
+löscht die Lesefehlerdiagnose, der Zustand bleibt bis zur Stabilisierung `null`.
+
+Die Abtastung ist kooperativ, keine Echtzeitgarantie. Wechsel zwischen zwei
+Messungen können softwareseitig nicht erkannt werden. Auch gleiche Pegel vor
+und nach einer Abtastverzögerung beweisen keine lückenlose Stabilität dazwischen;
+ein zwischenzeitlicher Wechsel kann unerkannt bleiben. Die Entprellung bewertet
+ausschließlich die beobachteten Pegel und die seit der ersten Beobachtung
+vergangene Zeit. Lange synchrone Firmwareoperationen können die Übernahme
+verzögern. Prüfung der realen
+Abtastzeiten und Relaiskontakte ist vor Einsatz auf Zielhardware erforderlich;
+siehe `NETWORK_SMOKE_TEST.md`.
 
 ---
 

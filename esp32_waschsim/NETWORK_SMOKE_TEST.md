@@ -25,6 +25,49 @@ Netzwerkparameter sind nun zentral in `network_manager.py` definiert.
 
 ## Manueller Smoke-Test auf realer ESP32-Zielhardware
 
+## Digitaleingänge: Entprellung und Pumpenkontakt
+
+Diese Prüfungen erfordern reale Zielhardware und wurden durch lokale Mocktests
+nicht ersetzt. GPIO27 (Heizung), GPIO26 (FriWa) und GPIO33 (Abwasserpumpe)
+ausschließlich über potentialfreie Kontakte gegen GND schalten. Auf der
+ESP32-Seite keine 230 V oder Fremdspannung anlegen. Pumpenaktivität bedeutet
+elektrische Ansteuerung und belegt keinen Wasserfluss.
+
+1. Mit offenen Kontakten booten. Nach mindestens 200 ms regelmäßiger Abtastung
+   müssen alle drei `hardware.*_aktiv`-Felder unter `GET /api/v1/status` `false`
+   sein und `eingangs_fehler` leer. Bis zur ersten Stabilisierung ist `null`
+   vorgesehen.
+2. Jeden Kontakt einzeln mindestens 200 ms schließen und anschließend
+   mindestens 200 ms öffnen. Nur das jeweilige Feld darf auf `true` bzw.
+   `false` wechseln. Wegen Abtastraster und REST-Latenz kann die Beobachtung
+   später erfolgen; sie darf niemals vor Ablauf des Stabilitätsfensters erfolgen.
+3. Mit einem potentialfreien Testsignal jeweils 100-ms-EIN- und AUS-Impulse
+   erzeugen. Der zuvor bestätigte Zustand darf nicht wechseln. Zeitfenster
+   mit geeignetem Messgerät kontrollieren, nicht nach Handgefühl beurteilen.
+4. Wiederholtes Prellen unterhalb 200 ms erzeugen; erst nach dem letzten
+   beobachteten Wechsel und mindestens 200 ms Stabilität darf der neue Zustand
+   erscheinen. Drei Kontakte zeitlich versetzt schalten und Unabhängigkeit prüfen.
+5. OLED abstecken, neu starten und dieselben REST-Prüfungen wiederholen.
+   Legacy-AP sowie STA-Verbindungsversuch/AP-Fallback prüfen; die Abtastung
+   muss auch während des WLAN-Starts laufen.
+6. Abtastabstände unter REST-Last, Displayupdates und Persistenzschreibzugriffen
+   mit temporärer Messinstrumentierung auf dem Testgerät prüfen. Bei einer
+   verzögerten Abtastung mit gleichem Rohpegel muss das laufende Zeitfenster
+   erhalten bleiben; nach mindestens 200 ms seit der ersten Beobachtung darf
+   der Zustand übernommen werden. Nur ein erkannter Rohsignalwechsel beginnt
+   das Zeitfenster neu. Wechsel zwischen Abtastungen bleiben möglicherweise
+   unerkannt, auch bei gleichen Pegeln vor und nach einer Verzögerung; eine
+   lückenlose physische Stabilität kann damit nicht nachgewiesen werden.
+7. Auf dem Testgerät kontrolliert einen Pininitialisierungs- bzw. Lesefehler
+   injizieren. Betroffener Zustand muss `null` und die Diagnose sichtbar sein;
+   andere Kontakte, REST und Sensorausgänge müssen weiter funktionieren.
+   Nach erfolgreicher Lesung erneut die volle 200-ms-Stabilisierung prüfen.
+   Ein offener oder abgezogener Relaiskontakt wird wegen Pull-up regulär AUS
+   und ist keine Erkennung eines Leitungsbruchs.
+
+Zusätzlich bestehende OLED-, NTC-, Druck-/PWM- und Netzwerktests wiederholen.
+Ergebnisse und gemessene Verzögerungen protokollieren.
+
 Vor den Tests `NETWORK_MODE = "auto"` nur temporaer auf dem Testgeraet setzen.
 
 ## OLED-UI-Smoke-Tests auf realer ESP32-Zielhardware
