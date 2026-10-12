@@ -341,6 +341,44 @@ Alle drei Eingänge verwenden dieselbe `EingangsEntprellung` in `hardware.py`:
 liefern bestätigte Bool-Werte. Beim Start bis zur ersten Stabilisierung sowie
 bei fehlendem oder fehlerhaftem Eingang liefern sie `None`, kein gültiges AUS.
 Nach einem Lesefehler muss das Signal erneut 200 ms beobachtet werden.
+Eine unerwartete Exception aus dem gesamten Abtastaufruf setzt zuerst die
+vorab angelegte Fehlersperre `eingangs_abtastfehler`. Alle drei öffentlichen
+Getter liefern damit sofort `None`, selbst wenn das anschließende Zurücksetzen
+der internen Entprellzustände scheitert. Die Diagnose erscheint unter
+`hardware.eingangs_fehler.abtasttask`. Der Taskfehlerpfad verwendet vorbereitete
+Konstanten und formatiert weder Exceptions noch neue Diagnosestrings.
+
+| Diagnosewert | Verhalten |
+|---|---|
+| `ABTASTFEHLER` | Übergreifender Abtastfehler: invalidieren, melden, nach 20 ms erneut versuchen. |
+| `ABTAST_SPEICHERFEHLER` | `MemoryError` beim Abtasten, auch beim GPIO-Lesen: dieselbe Wiederholungsstrategie ohne Exceptionformatierung. |
+| `ABTAST_INVALIDIERUNGSFEHLER` | Zurücksetzen der Entprellzustände scheitert: Task gesperrt beenden und Exception weiterreichen. |
+| `ABTAST_DIAGNOSEFEHLER` | Serielle Fehler- oder Erholungsausgabe scheitert: Task gesperrt beenden und Exception weiterreichen. |
+| `ABTAST_WARTEFEHLER` | Warteaufruf scheitert: Task gesperrt beenden und Exception weiterreichen; keine Schleife ohne Wartezeit. |
+| `ABTASTTASK_BEENDET` | Task noch nicht angelaufen oder bewusst abgebrochen; auch Fehler beim Task-Erzeugen lassen die Getter gesperrt. |
+
+Identische aufeinanderfolgende Abtastfehler werden nur einmal seriell ausgegeben.
+Bei erfolgreicher Wiederherstellung wird eine vorbereitete Erholungsmeldung
+ausgegeben. Bevor die Fehlersperre fallen darf, muss das Zurücksetzen aller
+Entprellzustände erfolgreich sein und eine neue Abtastung abgeschlossen werden.
+Bis zur erneuten 200-ms-Stabilisierung bleiben die Werte `null`. Das gilt auch
+für eine kontrollierte Wiederaufnahme nach einem fatalen Fehler. Es gibt keinen
+zusätzlichen Taskwächter und keinen automatischen Neustart nach fatalen Fehlern.
+`CancelledError` und fatale Folgefehler werden ausdrücklich weitergereicht.
+
+Bei einem fatalen Taskfehler kann REST weiterhin erreichbar sein, liefert aber
+keine alten Eingangszustände als gültig. Ursache beheben und vor der Vorführung
+kontrolliert neu starten. Die Fehlersperre darf nicht von Hand gelöscht werden.
+REST-Antworten, JSON-Aufbereitung und der Interpreter selbst benötigen weiterhin
+Speicher. Bei vollständiger Speichererschöpfung sind eine REST-Diagnose, serielle
+Ausgabe oder weitere Programmausführung nicht garantierbar. Die statische
+Fehlersperre reduziert Allokationen im kritischen Pfad, ist aber kein Nachweis
+eines beliebig speicherarmen oder beschädigten Interpreters.
+
+Das OLED zeigt unbekannte Heizung als `--` und unbekannte FriWa als `?` hinter
+dem Heizungsstatus. Bestätigte FriWa-Aktivität bleibt durch `I` gekennzeichnet;
+nur bestätigtes AUS hat keinen FriWa-Marker.
+
 `hat_heizungseingang()`, `hat_friwa_eingang()` und
 `hat_abwasserpumpeneingang()` melden die erfolgreiche Pininitialisierung.
 
@@ -370,6 +408,26 @@ vergangene Zeit. Lange synchrone Firmwareoperationen können die Übernahme
 verzögern. Prüfung der realen
 Abtastzeiten und Relaiskontakte ist vor Einsatz auf Zielhardware erforderlich;
 siehe `NETWORK_SMOKE_TEST.md`.
+
+Ein vorhandener bestätigter Zustand bleibt während einer reinen Taskverzögerung
+zwischengespeichert. Nach der Verzögerung kann derselbe neue Rohpegel bereits
+die seit seiner ersten Beobachtung abgelaufenen 200 ms erfüllen, auch wenn ein
+zwischenzeitlicher Wechsel unbemerkt blieb. Es gibt bewusst keine automatische
+Altersgrenze oder neue Abtastlückensperre. Ein blockierter Eventloop kann auch
+REST und Display verzögern; dieselbe Task kann ihre Blockade nicht selbst
+erkennen, solange sie nicht ausgeführt wird.
+
+Prüfbarer Vorschlag für die Vorführung: Auf der Zielhardware bekannte
+potentialfreie EIN-/AUS-Impulse und Prellfolgen erzeugen, die elektrischen
+Flanken mit einem Logikanalysator erfassen und mit instrumentierten Abtastzeiten
+unter WLAN-, REST-, Display- und Persistenzlast vergleichen. Dabei gezielt
+Blockaden länger als 200 ms erzeugen und verpasste Flanken protokollieren.
+Blockierende Operationen müssen anhand dieser Messungen reduziert bzw. aus der
+Abtastzeit herausgehalten werden. Falls jede Flanke trotz Blockaden erfasst
+werden muss, ist ein gesondert zu entwickelnder GPIO-IRQ mit vorab reserviertem
+Flankenspeicher oder eine externe Flankenspeicherung erforderlich. Das wird
+hier nur vorgeschlagen, nicht implementiert; auch diese Verfahren brauchen
+Grenztests für deaktivierte Interrupts, Überlauf und elektrische Störungen.
 
 ---
 

@@ -12,6 +12,7 @@ from main import SystemAnwendung
 class _HardwareMitEingaengen:
     def __init__(self):
         self.status_aufrufe = 0
+        self.eingangs_abtastfehler = None
 
     def lese_status(self):
         self.status_aufrufe += 1
@@ -58,6 +59,41 @@ def test_systemaktualisierung_verwendet_gemeinsamen_hardwarestatus():
     assert app.display_manager.update_aufrufe == 1
 
 
+@pytest.mark.parametrize("eingangsstatus", [
+    {}, {"heizung_aktiv": None, "friwa_aktiv": None},
+])
+def test_unbekannte_oder_fehlende_eingaenge_bleiben_fuer_oled_unbekannt(eingangsstatus):
+    hardware = _HardwareMitEingaengen()
+    hardware.lese_status = lambda: eingangsstatus
+    app = SystemAnwendung.__new__(SystemAnwendung)
+    app.hardware = hardware
+    app.druck_sensor = types.SimpleNamespace(berechne_druck_mmws=lambda pa: pa / 9.81)
+    app.display_manager = _DisplayRecorder()
+    app._aktualisiere_basisdaten()
+    assert app.display_manager.werte[-2:] == (None, None)
+
+
+def test_micropython_cancelled_error_wird_nicht_als_abtastfehler_abgefangen(monkeypatch):
+    class CancelledError(Exception):
+        pass
+
+    def abbrechen():
+        raise CancelledError()
+
+    diagnosen = []
+    app = SystemAnwendung.__new__(SystemAnwendung)
+    app.hardware = types.SimpleNamespace(
+        aktualisiere_digitale_eingaenge=abbrechen,
+        markiere_digitale_eingaenge_unbekannt=diagnosen.append,
+    )
+    monkeypatch.setattr(main_modul, "asyncio", types.SimpleNamespace(
+        CancelledError=CancelledError,
+    ))
+    with pytest.raises(CancelledError):
+        asyncio.run(app.digitale_eingaenge_task())
+    assert diagnosen == []
+
+
 @pytest.mark.parametrize("micropython", [False, True])
 def test_abtasttask_laeuft_ohne_oled_im_20_ms_takt(monkeypatch, micropython):
     ablauf = []
@@ -66,7 +102,7 @@ def test_abtasttask_laeuft_ohne_oled_im_20_ms_takt(monkeypatch, micropython):
         ablauf.append(("sleep", dauer))
         await asyncio.sleep(0)
 
-    fake_asyncio = types.SimpleNamespace()
+    fake_asyncio = types.SimpleNamespace(CancelledError=asyncio.CancelledError)
     if micropython:
         fake_asyncio.sleep_ms = sleep
     else:

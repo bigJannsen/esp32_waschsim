@@ -119,6 +119,7 @@ class _RealBackend:
             name: EingangsEntprellung()
             for name in ("heizung", "friwa", "abwasserpumpe")
         }
+        self._entprellte_eingaenge = tuple(self._eingangs_entprellung.values())
         self._eingangs_pins = {
             name: self._initialisiere_active_low_eingang(name, gpio)
             for name, gpio in (
@@ -189,6 +190,8 @@ class _RealBackend:
             return self._machine.Pin(
                 gpio, self._machine.Pin.IN, self._machine.Pin.PULL_UP
             )
+        except MemoryError:
+            raise
         except Exception as exc:
             self._eingangs_fehler[name] = "Initialisierung fehlgeschlagen: {}".format(exc)
             return None
@@ -204,11 +207,18 @@ class _RealBackend:
                 if wert not in (0, 1):
                     raise ValueError("Pin lieferte keinen digitalen Pegel")
                 entprellung.aktualisiere(wert == 0, ticks_ms())
+            except MemoryError:
+                raise
             except Exception as exc:
                 entprellung.zuruecksetzen()
                 self._eingangs_fehler[name] = "Einlesen fehlgeschlagen: {}".format(exc)
             else:
                 self._eingangs_fehler.pop(name, None)
+
+    def markiere_digitale_eingaenge_unbekannt(self):
+        """Verwirft nach einem uebergreifenden Abtastfehler alle Bestaetigungen."""
+        for entprellung in self._entprellte_eingaenge:
+            entprellung.zuruecksetzen()
 
     def lese_eingangs_fehler(self):
         """Liefert eine Kopie der Diagnosen, ohne die Pins erneut einzulesen."""
@@ -296,6 +306,8 @@ class HardwareAbstraktion:
         if backend != "real":
             raise ValueError("backend muss 'real' sein")
 
+        # Vorab angelegter Slot: zuerst sperren, erst danach Diagnose/Invalidierung.
+        self.eingangs_abtastfehler = None
         self._backend = _RealBackend(**konfiguration)
         self._backend_name = backend
         self._persistenz_defaults = {
@@ -515,6 +527,8 @@ class HardwareAbstraktion:
 
     def ist_heizung_aktiv(self):
         """Gibt den entprellten Heizungszustand zurueck (None = unbekannt)."""
+        if self.eingangs_abtastfehler is not None:
+            return None
         return self._backend.ist_heizung_aktiv()
 
     def hat_heizungseingang(self):
@@ -523,6 +537,8 @@ class HardwareAbstraktion:
 
     def ist_friwa_aktiv(self):
         """Gibt den entprellten FriWa-Zustand zurueck (None = unbekannt)."""
+        if self.eingangs_abtastfehler is not None:
+            return None
         return self._backend.ist_friwa_aktiv()
 
     def hat_friwa_eingang(self):
@@ -531,10 +547,21 @@ class HardwareAbstraktion:
 
     def aktualisiere_digitale_eingaenge(self):
         """Wird von der Abtasttask unabhaengig von OLED und REST aufgerufen."""
+        if self.eingangs_abtastfehler is not None:
+            # Ohne erfolgreiche Invalidierung darf die Sperre nicht fallen.
+            self._backend.markiere_digitale_eingaenge_unbekannt()
         self._backend.aktualisiere_digitale_eingaenge()
+        self.eingangs_abtastfehler = None
+
+    def markiere_digitale_eingaenge_unbekannt(self, meldung):
+        """Meldet einen Taskfehler; die Erholung braucht erneut 200 ms Beobachtung."""
+        self.eingangs_abtastfehler = meldung
+        self._backend.markiere_digitale_eingaenge_unbekannt()
 
     def ist_abwasserpumpe_aktiv(self):
         """Gibt den entprellten Pumpenzustand zurueck (None = unbekannt)."""
+        if self.eingangs_abtastfehler is not None:
+            return None
         return self._backend.ist_abwasserpumpe_aktiv()
 
     def hat_abwasserpumpeneingang(self):
@@ -543,12 +570,15 @@ class HardwareAbstraktion:
 
     def lese_status(self):
         """Liefert den diagnostischen Hardwarestatus ohne zusaetzliche I/O."""
+        eingangs_fehler = self._backend.lese_eingangs_fehler()
+        if self.eingangs_abtastfehler is not None:
+            eingangs_fehler["abtasttask"] = self.eingangs_abtastfehler
         return {
             "backend": self._backend_name,
             "heizung_aktiv": self.ist_heizung_aktiv(),
             "friwa_aktiv": self.ist_friwa_aktiv(),
             "abwasserpumpe_aktiv": self.ist_abwasserpumpe_aktiv(),
-            "eingangs_fehler": self._backend.lese_eingangs_fehler(),
+            "eingangs_fehler": eingangs_fehler,
             "temperature_1_c": self._persistenz_daten["temperature_1_c"],
             "temperature_2_c": self._persistenz_daten["temperature_2_c"],
             "ntc_code_1": self._persistenz_daten["ntc_code_1"],

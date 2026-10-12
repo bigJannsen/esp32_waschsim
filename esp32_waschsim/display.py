@@ -242,7 +242,10 @@ class DisplayManager:
 
     def _statuszeile(self):
         """Formatiert Heizung und kompakte FriWa-Anzeige auf maximal 16 Zeichen."""
-        friwa_marker = " I" if self._friwa_aktiv else ""
+        if self._friwa_aktiv is None:
+            friwa_marker = " ?"
+        else:
+            friwa_marker = " I" if self._friwa_aktiv else ""
         return "Heizung: " + self._heat_text() + friwa_marker
 
     def _render_status(self):
