@@ -58,10 +58,10 @@ class SystemAnwendung:
         status = self.hardware.lese_status()
         heizung = None
         if self.hardware.hat_heizungseingang():
-            heizung = status.get("heizung_aktiv", False)
+            heizung = status.get("heizung_aktiv")
         friwa = None
         if self.hardware.hat_friwa_eingang():
-            friwa = status.get("friwa_aktiv", False)
+            friwa = status.get("friwa_aktiv")
         pressure_pa = status.get("pressure_pa", 0.0)
         self.display_manager.aktualisiere_basiswerte(
             status.get("temperature_1_c", 0.0),
@@ -86,8 +86,24 @@ class SystemAnwendung:
 
     async def digitale_eingaenge_task(self):
         """Beobachtet Relaiskontakte unabhaengig von Display und HTTP-Anfragen."""
+        letzter_fehler = None
         while True:
-            self.hardware.aktualisiere_digitale_eingaenge()
+            try:
+                self.hardware.aktualisiere_digitale_eingaenge()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                meldung = "Digitale Abtastung fehlgeschlagen: {}: {}".format(
+                    type(exc).__name__, exc
+                )
+                self.hardware.markiere_digitale_eingaenge_unbekannt(meldung)
+                if meldung != letzter_fehler:
+                    print(meldung)
+                letzter_fehler = meldung
+            else:
+                if letzter_fehler is not None:
+                    print("Digitale Abtastung wiederhergestellt")
+                letzter_fehler = None
             if hasattr(asyncio, "sleep_ms"):
                 await asyncio.sleep_ms(EINGANG_ABTASTINTERVALL_MS)
             else:

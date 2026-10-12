@@ -341,6 +341,19 @@ Alle drei Eingänge verwenden dieselbe `EingangsEntprellung` in `hardware.py`:
 liefern bestätigte Bool-Werte. Beim Start bis zur ersten Stabilisierung sowie
 bei fehlendem oder fehlerhaftem Eingang liefern sie `None`, kein gültiges AUS.
 Nach einem Lesefehler muss das Signal erneut 200 ms beobachtet werden.
+Eine unerwartete Exception aus dem gesamten Abtastaufruf wird in der Task
+abgefangen. Alle drei Zustände werden unbekannt und die Diagnose erscheint
+unter `eingangs_fehler.abtasttask` sowie in der seriellen Ausgabe. Identische
+aufeinanderfolgende Fehler werden nur einmal ausgegeben. Die Task wartet auch
+nach einem Fehler das normale 20-ms-Intervall und versucht die Abtastung erneut.
+Nach erfolgreicher Abtastung wird die Taskdiagnose gelöscht; die Eingänge
+bleiben bis zur erneuten 200-ms-Stabilisierung unbekannt. Task-Abbruch durch
+`CancelledError` wird weitergereicht.
+
+Das OLED zeigt unbekannte Heizung als `--` und unbekannte FriWa als `?` hinter
+dem Heizungsstatus. Bestätigte FriWa-Aktivität bleibt durch `I` gekennzeichnet;
+nur bestätigtes AUS hat keinen FriWa-Marker.
+
 `hat_heizungseingang()`, `hat_friwa_eingang()` und
 `hat_abwasserpumpeneingang()` melden die erfolgreiche Pininitialisierung.
 

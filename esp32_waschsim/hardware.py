@@ -209,6 +209,13 @@ class _RealBackend:
                 self._eingangs_fehler[name] = "Einlesen fehlgeschlagen: {}".format(exc)
             else:
                 self._eingangs_fehler.pop(name, None)
+        self._eingangs_fehler.pop("abtasttask", None)
+
+    def markiere_digitale_eingaenge_unbekannt(self, meldung):
+        """Verwirft nach einem uebergreifenden Abtastfehler alle Bestaetigungen."""
+        for entprellung in self._eingangs_entprellung.values():
+            entprellung.zuruecksetzen()
+        self._eingangs_fehler["abtasttask"] = meldung
 
     def lese_eingangs_fehler(self):
         """Liefert eine Kopie der Diagnosen, ohne die Pins erneut einzulesen."""
@@ -532,6 +539,10 @@ class HardwareAbstraktion:
     def aktualisiere_digitale_eingaenge(self):
         """Wird von der Abtasttask unabhaengig von OLED und REST aufgerufen."""
         self._backend.aktualisiere_digitale_eingaenge()
+
+    def markiere_digitale_eingaenge_unbekannt(self, meldung):
+        """Meldet einen Taskfehler; die Erholung braucht erneut 200 ms Beobachtung."""
+        self._backend.markiere_digitale_eingaenge_unbekannt(meldung)
 
     def ist_abwasserpumpe_aktiv(self):
         """Gibt den entprellten Pumpenzustand zurueck (None = unbekannt)."""

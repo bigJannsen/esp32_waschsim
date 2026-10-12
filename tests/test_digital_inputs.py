@@ -11,6 +11,8 @@ import hardware as hardware_modul
 from hardware import EingangsEntprellung, HardwareAbstraktion, _RealBackend
 from rest import RestServer
 from sensors import NtcSensor, PressureSensor
+import main as main_modul
+from main import SystemAnwendung
 
 
 EINGAENGE = [
@@ -19,6 +21,93 @@ EINGAENGE = [
     ("abwasserpumpe", 33, "ist_abwasserpumpe_aktiv", "hat_abwasserpumpeneingang",
      "ABWASSERPUMPE_GPIO"),
 ]
+
+
+@pytest.mark.parametrize("micropython", [False, True])
+def test_abtasttask_erholt_sich_von_uebergreifendem_fehler_und_rest_laeuft_weiter(
+        aufbau, monkeypatch, capsys, micropython):
+    pin, uhr = aufbau
+    for _, gpio, _, _, _ in EINGAENGE:
+        pin.werte[gpio] = 0
+    hardware = HardwareAbstraktion()
+    abtasten(hardware, uhr, 0, 200)
+    original_abtastung = hardware.aktualisiere_digitale_eingaenge
+    aufrufe = [0]
+    snapshots = []
+    rest_antworten = []
+    port = [None]
+    wartezeiten = []
+
+    def abtastung_mit_fehler():
+        aufrufe[0] += 1
+        if aufrufe[0] <= 3:
+            raise RuntimeError("Fehler ausserhalb der GPIO-Lesebehandlung")
+        original_abtastung()
+
+    hardware.aktualisiere_digitale_eingaenge = abtastung_mit_fehler
+    app = SystemAnwendung(hardware, types.SimpleNamespace())
+
+    async def get(pfad):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port[0])
+        try:
+            writer.write(("GET {} HTTP/1.1\r\nHost: localhost\r\n\r\n".format(pfad)).encode())
+            await writer.drain()
+            antwort = await asyncio.wait_for(reader.read(), timeout=2)
+            header, body = antwort.split(b"\r\n\r\n", 1)
+            assert header.startswith(b"HTTP/1.1 200")
+            return json.loads(body)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def sleep(dauer):
+        wartezeiten.append(dauer)
+        snapshots.append(hardware.lese_status())
+        if aufrufe[0] == 1:
+            rest_antworten.append(await get("/api/v1/health"))
+            rest_antworten.append(await get("/api/v1/status"))
+        if aufrufe[0] == 14:
+            raise asyncio.CancelledError()
+        uhr.zeit_ms += 20
+        await asyncio.sleep(0)
+
+    fake_asyncio = types.SimpleNamespace(CancelledError=asyncio.CancelledError)
+    if micropython:
+        fake_asyncio.sleep_ms = sleep
+    else:
+        fake_asyncio.sleep = sleep
+    monkeypatch.setattr(main_modul, "asyncio", fake_asyncio)
+
+    async def pruefen():
+        server = await asyncio.start_server(app.rest_server._behandle_client, "127.0.0.1", 0)
+        port[0] = server.sockets[0].getsockname()[1]
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(app.digitale_eingaenge_task(), timeout=2)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    uhr.zeit_ms = 220
+    asyncio.run(pruefen())
+    assert len(snapshots) == 14
+    assert wartezeiten == [20 if micropython else 0.02] * 14
+    for status in snapshots[:13]:
+        for name, _, _, _, _ in EINGAENGE:
+            assert status[name + "_aktiv"] is None
+    for status in snapshots[:3]:
+        assert "RuntimeError" in status["eingangs_fehler"]["abtasttask"]
+    assert snapshots[3]["eingangs_fehler"] == {}
+    for name, _, methode, _, _ in EINGAENGE:
+        assert snapshots[-1][name + "_aktiv"] is True
+        assert getattr(hardware, methode)() is True
+    assert rest_antworten[0]["ok"] is True
+    for name, _, _, _, _ in EINGAENGE:
+        assert rest_antworten[1]["hardware"][name + "_aktiv"] is None
+    assert "abtasttask" in rest_antworten[1]["hardware"]["eingangs_fehler"]
+    ausgabe = capsys.readouterr().out
+    assert ausgabe.count("Digitale Abtastung fehlgeschlagen:") == 1
+    assert ausgabe.count("Digitale Abtastung wiederhergestellt") == 1
 
 
 class FakeTicks:

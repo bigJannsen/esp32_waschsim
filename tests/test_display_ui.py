@@ -73,6 +73,23 @@ def test_inaktive_friwa_hat_keinen_marker(ui, heizung, text):
     assert text + " I" not in display.content()
 
 
+@pytest.mark.parametrize("heizung,text", [
+    (False, "Heizung: AUS ?"), (True, "Heizung: AN ?"), (None, "Heizung: -- ?"),
+])
+def test_unbekannte_friwa_wird_von_aus_unterschieden(ui, heizung, text):
+    manager, display, _ = ui
+    manager.basisanzeige(25.0, 60.0, 0.0, 0.0, heizung, None)
+    assert text in display.content()
+    frames = len(display.frames)
+    manager.aktualisiere_basiswerte(25.0, 60.0, 0.0, 0.0, heizung, False)
+    manager.update()
+    assert len(display.frames) == frames + 1
+    assert "?" not in display.content()
+    manager.aktualisiere_basiswerte(25.0, 60.0, 0.0, 0.0, heizung, None)
+    manager.update()
+    assert text in display.content()
+
+
 def test_friwa_aenderung_zeichnet_basisanzeige_neu(ui):
     manager, display, _ = ui
     manager.basisanzeige(25.0, 60.0, 0.0, 0.0, False, False)
