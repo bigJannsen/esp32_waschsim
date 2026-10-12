@@ -12,6 +12,7 @@ from main import SystemAnwendung
 class _HardwareMitEingaengen:
     def __init__(self):
         self.status_aufrufe = 0
+        self.eingangs_abtastfehler = None
 
     def lese_status(self):
         self.status_aufrufe += 1

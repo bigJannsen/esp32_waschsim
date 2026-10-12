@@ -96,17 +96,18 @@ def test_abtasttask_erholt_sich_von_uebergreifendem_fehler_und_rest_laeuft_weite
         for name, _, _, _, _ in EINGAENGE:
             assert status[name + "_aktiv"] is None
     for status in snapshots[:3]:
-        assert "RuntimeError" in status["eingangs_fehler"]["abtasttask"]
+        assert status["eingangs_fehler"]["abtasttask"] == main_modul.ABTASTFEHLER
     assert snapshots[3]["eingangs_fehler"] == {}
     for name, _, methode, _, _ in EINGAENGE:
         assert snapshots[-1][name + "_aktiv"] is True
-        assert getattr(hardware, methode)() is True
+        assert getattr(hardware, methode)() is None  # Auch Task-Abbruch sperrt.
+    assert hardware.eingangs_abtastfehler == main_modul.ABTASTTASK_BEENDET
     assert rest_antworten[0]["ok"] is True
     for name, _, _, _, _ in EINGAENGE:
         assert rest_antworten[1]["hardware"][name + "_aktiv"] is None
     assert "abtasttask" in rest_antworten[1]["hardware"]["eingangs_fehler"]
     ausgabe = capsys.readouterr().out
-    assert ausgabe.count("Digitale Abtastung fehlgeschlagen:") == 1
+    assert ausgabe.count(main_modul.ABTASTFEHLER) == 1
     assert ausgabe.count("Digitale Abtastung wiederhergestellt") == 1
 
 

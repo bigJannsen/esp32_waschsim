@@ -14,6 +14,15 @@ from sensors import NtcSensor, PressureSensor
 
 SYSTEM_TASK_INTERVAL_MS = 200
 
+# Vorbereitete Werte: im Taskfehlerpfad kein format(), str(exc) oder Dict-Aufbau.
+ABTASTFEHLER = "ABTASTFEHLER"
+ABTAST_SPEICHERFEHLER = "ABTAST_SPEICHERFEHLER"
+ABTAST_INVALIDIERUNGSFEHLER = "ABTAST_INVALIDIERUNGSFEHLER"
+ABTAST_DIAGNOSEFEHLER = "ABTAST_DIAGNOSEFEHLER"
+ABTAST_WARTEFEHLER = "ABTAST_WARTEFEHLER"
+ABTASTTASK_BEENDET = "ABTASTTASK_BEENDET"
+ABTASTUNG_WIEDERHERGESTELLT = "Digitale Abtastung wiederhergestellt"
+
 
 class SystemAnwendung:
     """Erzeugt und verbindet die voneinander getrennten Firmware-Schichten."""
@@ -87,27 +96,45 @@ class SystemAnwendung:
     async def digitale_eingaenge_task(self):
         """Beobachtet Relaiskontakte unabhaengig von Display und HTTP-Anfragen."""
         letzter_fehler = None
-        while True:
-            try:
-                self.hardware.aktualisiere_digitale_eingaenge()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                meldung = "Digitale Abtastung fehlgeschlagen: {}: {}".format(
-                    type(exc).__name__, exc
-                )
-                self.hardware.markiere_digitale_eingaenge_unbekannt(meldung)
-                if meldung != letzter_fehler:
-                    print(meldung)
+        fehlerphase = ABTASTFEHLER
+        try:
+            while True:
+                fehlerphase = ABTASTFEHLER
+                try:
+                    self.hardware.aktualisiere_digitale_eingaenge()
+                except asyncio.CancelledError:
+                    raise
+                except MemoryError:
+                    meldung = ABTAST_SPEICHERFEHLER
+                except Exception:
+                    meldung = ABTASTFEHLER
+                else:
+                    meldung = None
+
+                if meldung is not None:
+                    # Bestehenden Slot sperren, bevor auch der Fehlerpfad scheitern kann.
+                    self.hardware.eingangs_abtastfehler = meldung
+                    fehlerphase = ABTAST_INVALIDIERUNGSFEHLER
+                    self.hardware.markiere_digitale_eingaenge_unbekannt(meldung)
+                    fehlerphase = ABTAST_DIAGNOSEFEHLER
+                    if meldung != letzter_fehler:
+                        print(meldung)
+                elif letzter_fehler is not None:
+                    fehlerphase = ABTAST_DIAGNOSEFEHLER
+                    print(ABTASTUNG_WIEDERHERGESTELLT)
                 letzter_fehler = meldung
-            else:
-                if letzter_fehler is not None:
-                    print("Digitale Abtastung wiederhergestellt")
-                letzter_fehler = None
-            if hasattr(asyncio, "sleep_ms"):
-                await asyncio.sleep_ms(EINGANG_ABTASTINTERVALL_MS)
-            else:
-                await asyncio.sleep(EINGANG_ABTASTINTERVALL_MS / 1000.0)
+                fehlerphase = ABTAST_WARTEFEHLER
+                if hasattr(asyncio, "sleep_ms"):
+                    await asyncio.sleep_ms(EINGANG_ABTASTINTERVALL_MS)
+                else:
+                    await asyncio.sleep(EINGANG_ABTASTINTERVALL_MS / 1000.0)
+        except asyncio.CancelledError:
+            self.hardware.eingangs_abtastfehler = ABTASTTASK_BEENDET
+            raise
+        except BaseException:
+            # Fehler im Fehlerpfad/Warten: gesperrt abbrechen, niemals still fortsetzen.
+            self.hardware.eingangs_abtastfehler = fehlerphase
+            raise
 
     async def _display_waehrend_netzwerkstart(self):
         """Laesst Boot-/WLAN-Anzeige laufen, ohne den Netzwerkstart zu blockieren."""
@@ -120,6 +147,8 @@ class SystemAnwendung:
                 await asyncio.sleep(SYSTEM_TASK_INTERVAL_MS / 1000.0)
 
     async def starte_system(self):
+        # Auch Speicherfehler beim Erzeugen der Coroutine/Task lassen nichts gueltig.
+        self.hardware.eingangs_abtastfehler = ABTASTTASK_BEENDET
         tasks = [asyncio.create_task(self.digitale_eingaenge_task())]
         try:
             if self.display_manager is not None and NETWORK_MODE == "auto":
@@ -145,6 +174,9 @@ class SystemAnwendung:
             tasks.append(asyncio.create_task(self.system_task()))
             await self.rest_server._starte_server_async()
         finally:
+            # Gilt auch, wenn eine Task vor ihrer ersten Ausfuehrung abgebrochen wird.
+            if self.hardware.eingangs_abtastfehler is None:
+                self.hardware.eingangs_abtastfehler = ABTASTTASK_BEENDET
             for task in tasks:
                 task.cancel()
             for task in tasks:
