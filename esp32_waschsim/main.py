@@ -48,6 +48,9 @@ class SystemAnwendung:
         self.druck_sensor = PressureSensor(hardware=self.hardware)
         self.simulation_manager = SimulationManager()
         self._simulation_aktiv = False
+        self._simulation_task_zustand = "nicht_gestartet"
+        self._simulation_eingaenge = None
+        self._simulation_eingangszeit_ms = None
         self._simulation_zeit_ms = None
         self._simulation_intervall_ms = None
         self._simulation_zustand = {}
@@ -73,9 +76,13 @@ class SystemAnwendung:
         Manuelle PUTs uebernehmen vor dem Schreiben ueber den Callback die
         Steuerung zurueck. Uebergabe und Sensorzugriffe enthalten kein await;
         Threads/IRQs duerfen diesen Laufzeitschalter nicht bedienen.
+        Aktivierung ist erst nach der ersten Taskausfuehrung moeglich und
+        startet eine beendete Task nicht neu. Deaktivierung bleibt immer erlaubt.
         """
         if not isinstance(aktiv, bool):
             raise ValueError("aktiv muss bool sein")
+        if aktiv and self._simulation_task_zustand != "laeuft":
+            raise RuntimeError("Simulationstask laeuft nicht")
         if aktiv != self._simulation_aktiv:
             self._simulation_zeit_ms = None
         self._simulation_aktiv = aktiv
@@ -87,10 +94,24 @@ class SystemAnwendung:
         """RAM-Diagnose fuer die spaetere REST-Schicht, inklusive echtem Druck.
 
         ausgabe_ok beschreibt den letzten Zyklus, keine Hardware-Rueckmessung.
+        task_laeuft umfasst Warten und noch nicht abgeschlossenes Abbrechen.
+        wird_beendet sperrt die Aktivierung bereits vor der Cancel-Bestaetigung.
+        unbekannte_eingaenge gehoert zum letzten vollstaendigen Getter-Snapshot:
+        None = noch keiner, [] = alle bekannt; bei Pause bleibt er erhalten.
         Eingangsdetails bleiben in hardware.lese_status()['eingangs_fehler'].
         """
         status = self.simulation_manager.lese_zustand()
         status["aktiv"] = self._simulation_aktiv
+        status["task_zustand"] = self._simulation_task_zustand
+        status["task_laeuft"] = self._simulation_task_zustand in ("laeuft", "wird_beendet")
+        status["eingangs_snapshot_ms"] = self._simulation_eingangszeit_ms
+        status["unbekannte_eingaenge"] = None
+        if self._simulation_eingaenge is not None:
+            status["unbekannte_eingaenge"] = [
+                name for name, wert in zip(("ventil", "heizung", "pumpe"),
+                                          self._simulation_eingaenge)
+                if wert is None
+            ]
         status["steuerung"] = "simulation" if self._simulation_aktiv else "manuell"
         status["task_fehler"] = self.simulation_fehler
         status["task_fehlerdetail"] = self.simulation_fehlerdetail
@@ -126,6 +147,8 @@ class SystemAnwendung:
         ventil = self.hardware.ist_friwa_aktiv()
         heizung = self.hardware.ist_heizung_aktiv()
         pumpe = self.hardware.ist_abwasserpumpe_aktiv()
+        self._simulation_eingaenge = (ventil, heizung, pumpe)
+        self._simulation_eingangszeit_ms = jetzt
         if ventil is None or heizung is None or pumpe is None:
             self._melde_simulationsfehler("SIMULATION_EINGANG_UNBEKANNT")
             return
@@ -157,7 +180,13 @@ class SystemAnwendung:
 
     async def simulation_task(self):
         """Eigene 100-ms-Task; Fehler isolieren, ausgefallene Zeit verwerfen."""
+        # Ein zweiter Start darf weder Ausgaben noch Lebenszyklus duplizieren.
+        if self._simulation_task_zustand in ("laeuft", "wird_beendet"):
+            return
         try:
+            # Erst die tatsaechliche Coroutine-Ausfuehrung gilt als Taskstart.
+            self._simulation_zeit_ms = None
+            self._simulation_task_zustand = "laeuft"
             while True:
                 try:
                     if self._simulation_aktiv:
@@ -185,6 +214,7 @@ class SystemAnwendung:
         finally:
             self.setze_simulation_aktiv(False)
             self._simulation_zeit_ms = None
+            self._simulation_task_zustand = "beendet"
 
     def initialisiere_hardware(self):
         self.hardware.initialisiere_hardware()
@@ -321,6 +351,13 @@ class SystemAnwendung:
             tasks.append(asyncio.create_task(self.simulation_task()))
             await self.rest_server._starte_server_async()
         finally:
+            # Auch vor der ersten Taskausfuehrung kann der Serverstart scheitern.
+            # Steuerung vor dem ersten await beim Aufraeumen synchron sperren.
+            self.setze_simulation_aktiv(False)
+            if self._simulation_task_zustand == "laeuft":
+                self._simulation_task_zustand = "wird_beendet"
+            else:
+                self._simulation_task_zustand = "beendet"
             # Gilt auch, wenn eine Task vor ihrer ersten Ausfuehrung abgebrochen wird.
             if self.hardware.eingangs_abtastfehler is None:
                 self.hardware.eingangs_abtastfehler = ABTASTTASK_BEENDET
