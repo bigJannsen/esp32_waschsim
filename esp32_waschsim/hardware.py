@@ -321,6 +321,7 @@ class HardwareAbstraktion:
             "letzter_status_text": "OK",
         }
         self._persistenz_daten = dict(self._persistenz_defaults)
+        self._laufzeit_daten = dict(self._persistenz_defaults)
         self._letzte_gespeicherte_konfiguration = None
 
         geladene_konfiguration = self.lade_konfiguration()
@@ -413,8 +414,7 @@ class HardwareAbstraktion:
         try:
             normalisiert = self._normalisiere_konfiguration(daten)
         except (ValueError, TypeError):
-            self._persistenz_daten["letzter_status_ok"] = False
-            self._persistenz_daten["letzter_status_text"] = "Persistenzfehler"
+            self._markiere_persistenzfehler()
             return None
 
         if normalisiert == self._letzte_gespeicherte_konfiguration:
@@ -431,14 +431,19 @@ class HardwareAbstraktion:
             os.rename(temp_datei, self._KONFIG_DATEINAME)
             self._letzte_gespeicherte_konfiguration = dict(normalisiert)
         except OSError:
-            self._persistenz_daten["letzter_status_ok"] = False
-            self._persistenz_daten["letzter_status_text"] = "Persistenzfehler"
+            self._markiere_persistenzfehler()
             try:
                 os.remove(temp_datei)
             except OSError:
                 pass
 
         return None
+
+    def _markiere_persistenzfehler(self):
+        """Erhaelt die Fehlerdiagnose in Konfiguration und aktuellem Status."""
+        for daten in (self._persistenz_daten, self._laufzeit_daten):
+            daten["letzter_status_ok"] = False
+            daten["letzter_status_text"] = "Persistenzfehler"
 
     def wende_konfiguration_an(self, daten):
         """Uebertraegt geladene Konfigurationswerte deterministisch in den Laufzeitzustand."""
@@ -450,6 +455,8 @@ class HardwareAbstraktion:
             normalisiert["letzter_status_text"] = "Konfiguration ungueltig"
 
         self._persistenz_daten = dict(normalisiert)
+        # Getrennte Kopien: Laufzeitwerte duerfen nie in spaetere Saves einfliessen.
+        self._laufzeit_daten = dict(normalisiert)
 
     def setze_ntc_code(self, ntc_code):
         """Schreibt kompatibilitaetshalber einen Code, ohne Fachdaten zu aendern."""
@@ -472,8 +479,11 @@ class HardwareAbstraktion:
             code = 255
         self._backend.write_digipot(channel, code)
 
-    def setze_ntc_zustand(self, channel, temperatur_c, code):
-        """Aktualisiert Hardware und persistierten fachlichen NTC-Zustand atomar."""
+    def setze_ntc_zustand(self, channel, temperatur_c, code, persistieren=True):
+        """Aktualisiert NTC-Hardware und RAM; speichert manuelle Werte optional.
+
+        Ohne Persistenz bleiben die gespeicherten Sollwerte aller Kanaele erhalten.
+        """
         channels = (1, 2) if channel is None else (channel,)
         if any(kanal not in (1, 2) for kanal in channels):
             raise ValueError("channel muss 1 oder 2 sein")
@@ -485,13 +495,22 @@ class HardwareAbstraktion:
             raise ValueError("code muss int im Bereich 0 bis 255 sein")
         for kanal in channels:
             self.write_digipot(kanal, code)
-            self._persistenz_daten["temperature_{}_c".format(kanal)] = float(temperatur_c)
-            self._persistenz_daten["ntc_code_{}".format(kanal)] = int(code)
+            self._laufzeit_daten["temperature_{}_c".format(kanal)] = float(temperatur_c)
+            self._laufzeit_daten["ntc_code_{}".format(kanal)] = int(code)
+            if persistieren:
+                self._persistenz_daten["temperature_{}_c".format(kanal)] = float(temperatur_c)
+                self._persistenz_daten["ntc_code_{}".format(kanal)] = int(code)
         self._backend.letzter_ntc_code = int(code)
-        self._markiere_erfolgreich_und_speichere()
+        self._laufzeit_daten["letzter_status_ok"] = True
+        self._laufzeit_daten["letzter_status_text"] = "OK"
+        if persistieren:
+            self._markiere_erfolgreich_und_speichere()
 
-    def setze_druck_zustand(self, pressure_pa, duty):
-        """Aktualisiert PWM-Hardware und persistierten fachlichen Druckzustand atomar."""
+    def setze_druck_zustand(self, pressure_pa, duty, persistieren=True):
+        """Aktualisiert PWM-Hardware und RAM; speichert manuelle Werte optional.
+
+        Ohne Persistenz bleiben die gespeicherten Druck- und PWM-Sollwerte erhalten.
+        """
         if isinstance(pressure_pa, bool) or not isinstance(pressure_pa, (int, float)):
             raise ValueError("pressure_pa muss numerisch sein")
         if pressure_pa < 0.0 or pressure_pa > 2452.0:
@@ -501,9 +520,14 @@ class HardwareAbstraktion:
         if duty < 0.0 or duty > 1.0:
             raise ValueError("duty muss im Bereich 0.0 bis 1.0 liegen")
         self._write_pwm_hardware(duty)
-        self._persistenz_daten["pressure_pa"] = float(pressure_pa)
-        self._persistenz_daten["pwm_duty"] = float(duty)
-        self._markiere_erfolgreich_und_speichere()
+        self._laufzeit_daten["pressure_pa"] = float(pressure_pa)
+        self._laufzeit_daten["pwm_duty"] = float(duty)
+        self._laufzeit_daten["letzter_status_ok"] = True
+        self._laufzeit_daten["letzter_status_text"] = "OK"
+        if persistieren:
+            self._persistenz_daten["pressure_pa"] = float(pressure_pa)
+            self._persistenz_daten["pwm_duty"] = float(duty)
+            self._markiere_erfolgreich_und_speichere()
 
     def _markiere_erfolgreich_und_speichere(self):
         self._persistenz_daten["letzter_status_ok"] = True
@@ -579,14 +603,14 @@ class HardwareAbstraktion:
             "friwa_aktiv": self.ist_friwa_aktiv(),
             "abwasserpumpe_aktiv": self.ist_abwasserpumpe_aktiv(),
             "eingangs_fehler": eingangs_fehler,
-            "temperature_1_c": self._persistenz_daten["temperature_1_c"],
-            "temperature_2_c": self._persistenz_daten["temperature_2_c"],
-            "ntc_code_1": self._persistenz_daten["ntc_code_1"],
-            "ntc_code_2": self._persistenz_daten["ntc_code_2"],
-            "pressure_pa": self._persistenz_daten["pressure_pa"],
-            "pwm_duty": self._persistenz_daten["pwm_duty"],
-            "letzter_status_ok": self._persistenz_daten["letzter_status_ok"],
-            "letzter_status_text": self._persistenz_daten["letzter_status_text"],
+            "temperature_1_c": self._laufzeit_daten["temperature_1_c"],
+            "temperature_2_c": self._laufzeit_daten["temperature_2_c"],
+            "ntc_code_1": self._laufzeit_daten["ntc_code_1"],
+            "ntc_code_2": self._laufzeit_daten["ntc_code_2"],
+            "pressure_pa": self._laufzeit_daten["pressure_pa"],
+            "pwm_duty": self._laufzeit_daten["pwm_duty"],
+            "letzter_status_ok": self._laufzeit_daten["letzter_status_ok"],
+            "letzter_status_text": self._laufzeit_daten["letzter_status_text"],
         }
 
     def hole_display(self):
