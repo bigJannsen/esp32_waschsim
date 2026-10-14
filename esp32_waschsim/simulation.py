@@ -4,6 +4,11 @@ Modellannahmen, KEINE verifizierten PWM-908-Herstellerdaten:
     Liegender Zylinder: Innendurchmesser 600 mm, Innenlaenge 400 mm.
     3 l effektive Materialverdraengung bei voll gefuelltem Zylinder,
     gleichmaessig ueber dessen Querschnitt verteilt (konstante Porositaet).
+    Diese homogene Verteilung ist nur eine Naeherung: reale Einbauten
+    verdraengen je nach Fuellhoehe unterschiedlich viel Wasser. Durchmesser,
+    Laenge und Materialverdraengung sind unbestaetigte Modellparameter.
+    Eine spaetere Kalibrierung anhand einer gemessenen Volumen-Druck-Kennlinie
+    kann erforderlich sein, auch zur Bewertung der homogenen Naeherung.
     Die perforierte Trommel ist wasserdurchlaessig. Ihre angegebenen 73 l
     werden weder als Behaeltervolumen noch als Verdraengung verwendet.
     Zulauf 10 l/min bei 15 Grad C, Ablauf 20 l/min, Heizung 5000 W,
@@ -34,15 +39,20 @@ Spaetere Integration (hier keine Imports anderer Firmwaremodule):
     hardware.py: bestaetigte Getter ist_friwa_aktiv(), ist_heizung_aktiv(),
     ist_abwasserpumpe_aktiv() als ventil, heizung, pumpe uebergeben. None nicht
     mit bool() in AUS umwandeln. Active-Low und Entprellung bleiben dort.
-    sensors.py: temperatur_c an NtcSensor.verarbeite_temperatur() und druck_pa
-    an PressureSensor.verarbeite_druck_pa() geben; keine Kennlinien duplizieren.
-    Der physikalische Druck kann 2452 Pa ueberschreiten: spaeter explizit
-    Fehler-/Saettigungsstrategie fuer den Sensorausgang festlegen. Der Kern
-    kappt die physikalische Wasserhoehe nicht auf den PWM-Messbereich.
+    sensors.py: temperatur_c an NtcSensor.verarbeite_temperatur() und den separat
+    begrenzten druck_sensor_pa an PressureSensor.verarbeite_druck_pa() geben;
+    keine Kennlinien duplizieren. Die lokalen Konstanten DRUCK_SENSOR_MIN_PA
+    und DRUCK_SENSOR_MAX_PA dokumentieren den vorhandenen Sensormessbereich.
+    druck_pa, druck_mmws, Wasservolumen und Wasserhoehe bleiben physikalische
+    Werte. druck_sensor_begrenzt meldet die Saettigung des Sensorausgabewerts.
     Achtung: aktuelle Sensor-Setter speichern geaenderte Werte in config.json.
-    Vor 10-Hz-Ausgabe Laufzeitwerte von Flash-Persistenz entkoppeln!
+    Zyklische Sensorausgabe darf erst integriert werden, nachdem Laufzeitwerte
+    und Flash-Persistenz in einem separaten Schritt entkoppelt wurden.
+    Dieses Modul schreibt keine Dateien und ruft weder Hardware-Setter noch
+    Persistenzmethoden auf; es berechnet und liefert ausschliesslich Werte.
     rest.py: lese_zustand() spaeter unter 'simulation' bereitstellen; Zuordnung
-    temperatur_c -> temperature_c, druck_pa -> pressure_pa im Integrationscode.
+    temperatur_c -> temperature_c, druck_sensor_pa -> pressure_pa fuer den
+    Sensorpfad im Integrationscode. Physikalischen druck_pa separat erhalten.
     Manuelle REST-Vorgaben und Automatik brauchen eine eindeutige Prioritaet.
     display.py kann weiter die ausgegebenen Sensorwerte darstellen.
 
@@ -55,6 +65,10 @@ from math import atan2, exp, log, pi, sqrt
 
 _WASSERKAPAZITAET_J_L_K = 4180.0
 _PA_PRO_MMWS = 9.81  # Projektkonvention, rho = 1000 kg/m^3.
+# Ausgabegrenzen entsprechend PressureSensor.DRUCK_MIN_PA / DRUCK_MAX_PA.
+# Lokal definiert, damit der physikalische Kern keine Sensorlogik importiert.
+DRUCK_SENSOR_MIN_PA = 0.0
+DRUCK_SENSOR_MAX_PA = 2452.0
 
 
 class SimulationManager:
@@ -279,7 +293,14 @@ class SimulationManager:
     def _wasserhoehe_mm(self):
         """Invertiert Kreisabschnittsvolumen mit 20 begrenzten Bisektionsschritten.
 
-        Homogene Materialverteilung: V(h) = Nutzkapazitaet*A(h)/(pi*r^2).
+        Homogene Materialverteilung als Naeherung:
+        V(h) = Nutzkapazitaet*A(h)/(pi*r^2), r = Durchmesser/2.
+        A(h) = r^2*(theta - sin(theta)*cos(theta)),
+        theta = atan2(sqrt(y*(2-y)), 1-y), y = h/r.
+        Der Kreisabschnitt waechst monoton von 0 bis pi*r^2; halbe
+        Nutzkapazitaet entspricht h=r. Laenge und Materialverdraengung
+        gehen ueber die Nutzkapazitaet ein, ohne pauschalen Volumenabzug
+        bei kleinen Fuellhoehen oder Abzug der 73 l Trommelvolumen.
         Spiegelung an halber Hoehe vermeidet Ausloeschung am oberen Rand.
         Winkel ueber atan2 statt acos(1-h/r), stabil auch nahe leer.
         Fehler der Bisektion maximal Durchmesser/2^21, zzgl. Float-Rundung
@@ -290,10 +311,13 @@ class SimulationManager:
             return 0.0
         if self._volumen_l >= self._kapazitaet_l:
             return self._durchmesser_mm
-        anteil = self._volumen_l / self._kapazitaet_l
-        spiegeln = anteil > 0.5
+        spiegeln = self._volumen_l > 0.5 * self._kapazitaet_l
         if spiegeln:
-            anteil = 1.0 - anteil
+            # Restvolumen vor der Division bilden: genauer als 1 - V/V_max
+            # nahe voll, insbesondere bei MicroPython mit Float32.
+            anteil = (self._kapazitaet_l - self._volumen_l) / self._kapazitaet_l
+        else:
+            anteil = self._volumen_l / self._kapazitaet_l
         unten = 0.0
         oben = 1.0  # Normierte Hoehe h/r in der unteren Zylinderhaelfte.
         for _ in range(20):
@@ -321,6 +345,11 @@ class SimulationManager:
         ueberlauf_l ist nur die Menge des letzten akzeptierten Intervalls.
         druck_mmws ist die Wassersaeule UEBER dem Druckanschluss, kein Offset
         des Sensors; ein trockener Anschluss liefert 0 Pa und 0 mmWS.
+        druck_pa bleibt der unverfaelschte physikalische Druck. Ausschliesslich
+        druck_sensor_pa wird auf DRUCK_SENSOR_MIN_PA..DRUCK_SENSOR_MAX_PA
+        begrenzt (Einheit Pa); druck_sensor_begrenzt ist genau dann True,
+        wenn dieser Ausgabewert vom physikalischen Druck abweicht. Die
+        Begrenzung aendert weder Wasservolumen noch Wasserhoehe oder Thermik.
         Ein uebergebenes ziel bleibt Eigentum des Aufrufers; fremde Keys bleiben.
         Ohne ziel wird ausschliesslich hier ein neues Snapshot-Dict angelegt.
         """
@@ -330,10 +359,14 @@ class SimulationManager:
             raise ValueError("ziel muss dict oder None sein")
         hoehe = self._wasserhoehe_mm()
         druck_mmws = max(0.0, hoehe - self._druckanschluss_mm)
+        druck_pa = druck_mmws * _PA_PRO_MMWS
+        druck_sensor_pa = max(DRUCK_SENSOR_MIN_PA, min(DRUCK_SENSOR_MAX_PA, druck_pa))
         ziel["wasservolumen_l"] = self._volumen_l
         ziel["wasserhoehe_mm"] = hoehe
         ziel["druck_mmws"] = druck_mmws
-        ziel["druck_pa"] = druck_mmws * _PA_PRO_MMWS
+        ziel["druck_pa"] = druck_pa
+        ziel["druck_sensor_pa"] = druck_sensor_pa
+        ziel["druck_sensor_begrenzt"] = druck_sensor_pa != druck_pa
         ziel["temperatur_c"] = self._temperatur_c
         ziel["ventil"] = self._ventil
         ziel["heizung"] = self._heizung
