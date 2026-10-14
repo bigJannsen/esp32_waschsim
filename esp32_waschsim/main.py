@@ -67,6 +67,8 @@ class SystemAnwendung:
             hardware=self.hardware,
             event_callback=self._ui_event,
             before_sensor_write=self._uebernehme_manuelle_sensorsteuerung,
+            set_simulation_active=self.setze_simulation_aktiv,
+            get_simulation_status=self.lese_simulationsstatus,
         )
 
     def setze_simulation_aktiv(self, aktiv):
