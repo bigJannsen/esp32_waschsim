@@ -16,7 +16,7 @@ class RestServer:
     TEMPERATUR_MAX_C = 100.0
 
     def __init__(self, ntc_sensor, pressure_sensor, hardware, host="0.0.0.0", port=8080,
-                 event_callback=None):
+                 event_callback=None, before_sensor_write=None):
         """Initialisiert den REST-Server mit allen benoetigten Abhaengigkeiten."""
         self.ntc_sensor = ntc_sensor
         self.pressure_sensor = pressure_sensor
@@ -24,6 +24,9 @@ class RestServer:
         self.host = host
         self.port = port
         self.event_callback = event_callback
+        # Synchroner Koordinationshook nach Validierung, vor jedem manuellen PUT.
+        # Fehler nicht verschlucken: ohne Steuerungsuebergabe keine Sensorausgabe.
+        self.before_sensor_write = before_sensor_write
         hardware_status = self.hardware.lese_status()
         self._letzte_werte = {
             "temperature": {
@@ -169,6 +172,8 @@ class RestServer:
                     temperatur_c = self._hole_float_feld(daten, "temperature_c")
                     self._pruefe_temperaturbereich(temperatur_c, "temperature_c")
 
+                    if self.before_sensor_write is not None:
+                        self.before_sensor_write()
                     ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c)
 
                     self._letzte_werte["temperature"] = {
@@ -214,6 +219,8 @@ class RestServer:
                 self._pruefe_temperaturbereich(temperatur_1_c, "temperature_1_c")
                 self._pruefe_temperaturbereich(temperatur_2_c, "temperature_2_c")
 
+                if self.before_sensor_write is not None:
+                    self.before_sensor_write()
                 ntc_code_1 = self.ntc_sensor.verarbeite_temperatur(temperatur_1_c, channel=1)
                 ntc_code_2 = self.ntc_sensor.verarbeite_temperatur(temperatur_2_c, channel=2)
 
@@ -263,6 +270,8 @@ class RestServer:
                 temperatur_c = self._hole_float_feld(daten, "temperature_c")
                 self._pruefe_temperaturbereich(temperatur_c, "temperature_c")
 
+                if self.before_sensor_write is not None:
+                    self.before_sensor_write()
                 ntc_code = self.ntc_sensor.verarbeite_temperatur(temperatur_c, channel=channel)
 
                 self._letzte_werte["temperature"]["mode"] = "single"
@@ -296,6 +305,8 @@ class RestServer:
             pressure_pa = self._hole_float_feld(daten, "pressure_pa")
             self._pruefe_druckbereich(pressure_pa, "pressure_pa")
 
+            if self.before_sensor_write is not None:
+                self.before_sensor_write()
             pwm_duty = self.pressure_sensor.verarbeite_druck_pa(pressure_pa)
 
         except ValueError as exc:
