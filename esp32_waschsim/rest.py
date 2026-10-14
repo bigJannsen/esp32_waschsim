@@ -16,7 +16,8 @@ class RestServer:
     TEMPERATUR_MAX_C = 100.0
 
     def __init__(self, ntc_sensor, pressure_sensor, hardware, host="0.0.0.0", port=8080,
-                 event_callback=None, before_sensor_write=None):
+                 event_callback=None, before_sensor_write=None,
+                 set_simulation_active=None, get_simulation_status=None):
         """Initialisiert den REST-Server mit allen benoetigten Abhaengigkeiten."""
         self.ntc_sensor = ntc_sensor
         self.pressure_sensor = pressure_sensor
@@ -27,6 +28,9 @@ class RestServer:
         # Synchroner Koordinationshook nach Validierung, vor jedem manuellen PUT.
         # Fehler nicht verschlucken: ohne Steuerungsuebergabe keine Sensorausgabe.
         self.before_sensor_write = before_sensor_write
+        # Synchrone System-Callbacks: REST kennt weder Task noch Simulationskern.
+        self.set_simulation_active = set_simulation_active
+        self.get_simulation_status = get_simulation_status
         hardware_status = self.hardware.lese_status()
         self._letzte_werte = {
             "temperature": {
@@ -118,6 +122,8 @@ class RestServer:
                 return self._route_setze_temperatur(body_raw)
             if methode == "PUT" and pfad == self.API_BASIS + "/sensors/pressure":
                 return self._route_setze_druck(body_raw)
+            if methode == "PUT" and pfad == self.API_BASIS + "/simulation/mode":
+                return self._route_setze_simulationsmodus(body_raw)
         except ValueError as exc:
             return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
 
@@ -125,6 +131,8 @@ class RestServer:
             return self._route_status()
         if methode == "GET" and pfad == self.API_BASIS + "/health":
             return self._route_health()
+        if methode == "GET" and pfad == self.API_BASIS + "/simulation":
+            return self._route_simulation()
         return self._fehlerantwort(404, "NOT_FOUND", "Route nicht gefunden")
 
     async def _lese_headers(self, reader):
@@ -333,6 +341,59 @@ class RestServer:
             }
         )
 
+    def _route_simulation(self):
+        """Liefert den unveraenderten System-Snapshot ohne Steuerungsuebergabe."""
+        if self.get_simulation_status is None:
+            return self._fehlerantwort(503, "SIMULATION_UNAVAILABLE", "Simulation nicht angebunden")
+        try:
+            status = self.get_simulation_status()
+            if not isinstance(status, dict):
+                raise ValueError("Simulationsstatus muss ein Objekt sein")
+        except Exception:
+            return self._fehlerantwort(500, "SIMULATION_STATUS_ERROR", "Simulationsstatus nicht lesbar")
+        return self._ok_antwort(status)
+
+    def _route_setze_simulationsmodus(self, body_raw):
+        """Validiert PUT /simulation/mode und bestaetigt den erreichten Zustand."""
+        try:
+            daten = self._parse_json_body(body_raw)
+        except ValueError as exc:
+            return self._fehlerantwort(400, "BAD_REQUEST", str(exc))
+
+        if "mode" not in daten:
+            return self._fehlerantwort(400, "BAD_REQUEST", "mode fehlt")
+        if len(daten) != 1:
+            return self._fehlerantwort(400, "BAD_REQUEST", "Nur mode ist erlaubt")
+        mode = daten["mode"]
+        if not isinstance(mode, str) or mode not in ("auto", "manual"):
+            return self._fehlerantwort(400, "BAD_REQUEST", "mode muss 'auto' oder 'manual' sein")
+
+        if self.set_simulation_active is None or self.get_simulation_status is None:
+            return self._fehlerantwort(503, "SIMULATION_UNAVAILABLE", "Simulation nicht angebunden")
+        aktiv = mode == "auto"
+        try:
+            # Kein await bis zum Snapshot: atomare Uebergabe im kooperativen Loop.
+            self.set_simulation_active(aktiv)
+        except RuntimeError as exc:
+            if aktiv:
+                return self._fehlerantwort(409, "SIMULATION_NOT_RUNNING", str(exc))
+            return self._fehlerantwort(500, "SIMULATION_MODE_ERROR", "Simulation nicht deaktivierbar")
+        except Exception:
+            return self._fehlerantwort(500, "SIMULATION_MODE_ERROR", "Simulationsmodus nicht setzbar")
+
+        status_code, status = self._route_simulation()
+        if status_code != 200:
+            # Kein Rollback: eine bereits erfolgte Uebergabe bleibt erhalten.
+            return status_code, status
+        if status.get("aktiv") is not aktiv:
+            return self._fehlerantwort(500, "SIMULATION_MODE_ERROR", "Simulationsmodus nicht erreicht")
+        if aktiv and (status.get("task_zustand") != "laeuft"
+                      or status.get("task_laeuft") is not True):
+            return self._fehlerantwort(409, "SIMULATION_NOT_RUNNING", "Simulationstask laeuft nicht")
+
+        erreichter_modus = "auto" if status["aktiv"] else "manual"
+        return self._ok_antwort({"ok": True, "mode": erreichter_modus, "simulation": status})
+
     def _route_status(self):
         """Liefert den Hardwarestatus sauber geschachtelt zurueck."""
         hardware_status = self.hardware.lese_status()
@@ -389,12 +450,12 @@ class RestServer:
 
     def _pruefe_temperaturbereich(self, temperatur_c, feldname):
         """Prueft den Temperaturbereich."""
-        if temperatur_c < self.TEMPERATUR_MIN_C or temperatur_c > self.TEMPERATUR_MAX_C:
+        if not self.TEMPERATUR_MIN_C <= temperatur_c <= self.TEMPERATUR_MAX_C:
             raise ValueError("{} ausserhalb 0.0 bis 100.0".format(feldname))
 
     def _pruefe_druckbereich(self, pressure_pa, feldname):
         """Prueft den Druckbereich."""
-        if pressure_pa < 0.0 or pressure_pa > 2452.0:
+        if not 0.0 <= pressure_pa <= 2452.0:
             raise ValueError("{} ausserhalb 0.0 bis 2452.0".format(feldname))
 
     def _ok_antwort(self, payload):
@@ -411,7 +472,9 @@ class RestServer:
             200: "OK",
             400: "Bad Request",
             404: "Not Found",
+            409: "Conflict",
             500: "Internal Server Error",
+            503: "Service Unavailable",
         }.get(status_code, "OK")
         body = json.dumps(payload).encode("utf-8")
         header = (
