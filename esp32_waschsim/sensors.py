@@ -103,14 +103,17 @@ class NtcSensorBasis(SensorBasis):
 
             letzter_temperaturwert = temperatur_c
 
-    def verarbeite_temperatur(self, temperatur_c, channel=None):
-        """Verarbeitet einen Temperaturwert und setzt optional einen einzelnen NTC-Kanal."""
+    def verarbeite_temperatur(self, temperatur_c, channel=None, persistieren=True):
+        """Setzt NTC-Kanaele; persistieren=False aktualisiert nur Hardware und RAM."""
         temperatur_c = self._validiere_float_bereich(
             temperatur_c, "temperatur_c", self.TEMPERATUR_MIN_C, self.TEMPERATUR_MAX_C
         )
         widerstand_ohm = self.berechne_widerstand_ohm(temperatur_c)
         ntc_code = self.quantisierung_ohm_zu_code(widerstand_ohm)
-        self.schreibe_ntc_code(ntc_code, channel=channel, temperatur_c=temperatur_c)
+        self.schreibe_ntc_code(
+            ntc_code, channel=channel, temperatur_c=temperatur_c,
+            persistieren=persistieren,
+        )
 
         return ntc_code
 
@@ -167,11 +170,17 @@ class NtcSensorBasis(SensorBasis):
 
         return code
 
-    def schreibe_ntc_code(self, ntc_code, channel=None, temperatur_c=None):
-        """NTC Code ausgeben"""
+    def schreibe_ntc_code(self, ntc_code, channel=None, temperatur_c=None, persistieren=True):
+        """Gibt den NTC-Code aus und reicht die Persistenzwahl an die Hardware weiter."""
         if self.hardware is not None:
             if hasattr(self.hardware, "setze_ntc_zustand"):
-                self.hardware.setze_ntc_zustand(channel, temperatur_c, ntc_code)
+                if persistieren:
+                    # Bestehende Hardwareadapter ohne neuen Parameter bleiben nutzbar.
+                    self.hardware.setze_ntc_zustand(channel, temperatur_c, ntc_code)
+                else:
+                    self.hardware.setze_ntc_zustand(
+                        channel, temperatur_c, ntc_code, persistieren=False
+                    )
             elif channel is None:
                 self.hardware.setze_ntc_code(ntc_code)
             else:
@@ -272,10 +281,12 @@ class PressureSensorBasis(SensorBasis):
         if self.DUTY_MIN_NORM < 0.0 or self.DUTY_MAX_NORM > 1.0:
             raise ValueError("Duty muss zwischen 0.0 und 1.0 liegen")
 
-    def verarbeite_druck_pa(self, druck_pa):
-        """Druck in PWM Duty"""
+    def verarbeite_druck_pa(self, druck_pa, persistieren=True):
+        """Setzt Druck/PWM; persistieren=False aktualisiert nur Hardware und RAM."""
         duty_norm = self.berechne_duty_norm(druck_pa)
-        self.schreibe_pwm_duty(duty_norm, druck_pa=float(druck_pa))
+        self.schreibe_pwm_duty(
+            duty_norm, druck_pa=float(druck_pa), persistieren=persistieren
+        )
 
         return duty_norm
 
@@ -295,11 +306,17 @@ class PressureSensorBasis(SensorBasis):
 
         return self.DUTY_MIN_NORM + anteil * duty_span
 
-    def schreibe_pwm_duty(self, duty_norm, druck_pa=None):
-        """PWM Duty ausgeben"""
+    def schreibe_pwm_duty(self, duty_norm, druck_pa=None, persistieren=True):
+        """Gibt PWM aus und reicht die Persistenzwahl an die Hardware weiter."""
         if self.hardware is not None:
             if hasattr(self.hardware, "setze_druck_zustand"):
-                self.hardware.setze_druck_zustand(druck_pa, duty_norm)
+                if persistieren:
+                    # Bestehende Hardwareadapter ohne neuen Parameter bleiben nutzbar.
+                    self.hardware.setze_druck_zustand(druck_pa, duty_norm)
+                else:
+                    self.hardware.setze_druck_zustand(
+                        druck_pa, duty_norm, persistieren=False
+                    )
             else:
                 self.hardware.setze_pwm_duty(duty_norm)
 
